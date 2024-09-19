@@ -28,7 +28,7 @@
     (setf *buffer-space-spaces* (make-hash-table :test 'equal))
     (let* ((buffers (buffer-list))
            (rect-edge-length (ceiling (sqrt (length buffers)))))
-      (cl-block early-exit ; kind of gross, refactor
+      (cl-block early-exit ; kind of gross, refactor to calculate x and y while iterating.
         (dotimes (x rect-edge-length)
           (dotimes (y rect-edge-length)
             (puthash (vector x y) (car buffers) *buffer-space-spaces*)
