@@ -27,10 +27,6 @@
 is nil, then get the direct bsm-parent of this function. Otherwise get the
 caller of the named function passed into caller-of (which is assumed to be
 on the stack). This function looks explicitly for bsm- prefixed names."
-  ;; 5 is the magic number that makes us look
-  ;; above this function
-
-  ;; (backtrace)
   (let* ((bt (vector)))
     ;; get a snapshot of the backtrace when we entered this function.
     (let ((frame-num 0))
