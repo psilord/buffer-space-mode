@@ -22,11 +22,11 @@
 ;;; Utilities
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun bsm-get-current-func-name (&optional caller-of)
+(defun bsm-get-bsm-caller-of (&optional caller-of)
   "Get the symbol of the function this function is called from. If caller-of
 is nil, then get the direct bsm-parent of this function. Otherwise get the
 caller of the named function passed into caller-of (which is assumed to be
-on the stack)."
+on the stack). This function looks explicitly for bsm- prefixed names."
   ;; 5 is the magic number that makes us look
   ;; above this function
 
@@ -86,7 +86,7 @@ on the stack)."
   "Call error with the fmt and args, but try to find the most recently
 enclosing function prefixed with bsm- and put it into the error message."
   (apply 'error (concat "Error: (%s): " fmt)
-         (bsm-get-current-func-name 'bsm-error) args))
+         (bsm-get-bsm-caller-of 'bsm-error) args))
 
 (defun bsm-euclidean-distance (p0 p1)
   "Return the Euclidean distance between two points p0 and p1. The
