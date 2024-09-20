@@ -47,7 +47,7 @@ on the stack)."
              (frame-num (first frame-spec))
              (frame (second frame-spec)))
         (let ((kind (eql't (car frame))))
-          (princ (format ";; [%03s] %s--> (%s %s ...)\n"
+          (princ (format ";; [%3s] %s--> (%s %s ...)\n"
                          frame-num
                          (if kind
                              "*"
