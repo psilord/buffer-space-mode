@@ -80,13 +80,13 @@ on the stack)."
                            (first frame)
                            (second frame)))))))
 
-    nil))
+    :fixme))
 
 (defun bsm-error (fmt &rest args)
   "Call error with the fmt and args, but try to find the most recently
 enclosing function prefixed with bsm- and put it into the error message."
   (apply 'error (concat "Error: (%s): " fmt)
-         (bsm-get-current-func-name 2) args))
+         (bsm-get-current-func-name 'bsm-error) args))
 
 (defun bsm-euclidean-distance (p0 p1)
   "Return the Euclidean distance between two points p0 and p1. The
