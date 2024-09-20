@@ -61,7 +61,11 @@ on the stack)."
     ;; 0. Starting at the bottom (most recent) frame.
     ;;
     ;; 1. Skip frames up to (t bsm-get-current-func-name)
-    ;; 2. Skip unevaluated frames up to the next evaluated frame
+    ;;
+    ;; 2. if caller-of is nil, then skip upto the next t bsm- frame and
+    ;;    that's the answer.
+    ;;    if caller-of is non-nil, then skip up to the frame identified, then
+    ;;    skip upto the next t bsm- frame and that's the answer.
     (when nil
       (dotimes (fid (length bt))
         (let* ((frame-spec (elt bt fid))
