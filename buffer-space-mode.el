@@ -138,14 +138,14 @@ points must be vectors and of the same length."
   (setf *bsm-buffer-space-spaces* (make-hash-table :test 'equal))
   (let* ((buffers (buffer-list))
          (rect-edge-length (ceiling (sqrt (length buffers)))))
-    (dotimes (i (length buffers))
+    (cl-loop for i below (length buffers)
+             for buf in buffers do
       (let ((x (mod i rect-edge-length))
             (y (/ i rect-edge-length)))
         (puthash (vector x y)
                  (bsm-entity-buffer :bsm-loc (vector x y)
-                                    :bsm-buffer (car buffers))
-                 *bsm-buffer-space-spaces*)
-          (setf buffers (cdr buffers))))
+                                    :bsm-buffer buf)
+                 *bsm-buffer-space-spaces*)))
     *bsm-buffer-space-spaces*))
 
 (defun bsmg-dump-buffer-space ()
