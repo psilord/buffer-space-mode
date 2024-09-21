@@ -42,11 +42,10 @@ the call to this function."
 
 ;; used with bsm-error
 (defun bsm-find-frame-num (selector-func bt start-index)
-  "Return the evaled frame number that contains the func specified and
-matches the evald critiera. evaldp can be: :not-evald, which means to
-only search unevald frames, :evald, which means search only evald
-frames, and :all, which means search both kinds of frames. If the frame
-cannot bne found under the conditions specified, return nil."
+  "Return the first frame-num corresponding to the frame matched by
+the selector-func that began its search at start-index.
+If the frame cannot be found that matches the selector-func,
+return nil."
   (cl-loop
    for fid from start-index below (length bt)
    do (cl-destructuring-bind (frame-num frame) (elt bt fid)
@@ -55,6 +54,8 @@ cannot bne found under the conditions specified, return nil."
             (cl-return frame-num))))))
 
 (defun bsm-collect-frames (selector-func bt start-index)
+  "Starting at the start-index in bt, collect any frames that match the
+selector-func and return the list."
   (cl-loop
    for fid from start-index below (length bt)
    when (cl-destructuring-bind (frame-num frame) (elt bt fid)
