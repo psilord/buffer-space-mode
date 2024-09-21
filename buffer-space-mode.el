@@ -17,9 +17,15 @@
             ([down] . bsm-look-down))
   )
 
+;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Globals
+;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; For now I'm just shoving one space in later it'll be a collection
+(defvar *bsm-buffer-space-spaces* (make-hash-table :test 'equal))
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; The bsm-error handling system and associated utilities.
+;;; The bsm-error handling system and associated functions
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; used with bsm-error
@@ -43,16 +49,16 @@ frames, and :all, which means search both kinds of frames. If the frame
 cannot bne found under the conditions specified, return nil."
   (cl-loop
    for fid from start-index below (length bt)
-   do (destructuring-bind (frame-num frame) (elt bt fid)
-        (destructuring-bind (evald func args flags) frame
+   do (cl-destructuring-bind (frame-num frame) (elt bt fid)
+        (cl-destructuring-bind (evald func args flags) frame
           (when (funcall selector-func evald func args flags)
             (cl-return frame-num))))))
 
 (defun bsm-collect-frames (selector-func bt start-index)
   (cl-loop
    for fid from start-index below (length bt)
-   when (destructuring-bind (frame-num frame) (elt bt fid)
-          (destructuring-bind (evald func args flags) frame
+   when (cl-destructuring-bind (frame-num frame) (elt bt fid)
+          (cl-destructuring-bind (evald func args flags) frame
             (funcall selector-func evald func args flags)))
    collect (elt bt fid)))
 
@@ -165,7 +171,10 @@ points must be vectors and of the same length."
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defclass bsm-entity ()
-  ((%bsm-loc :accessor bsm-loc
+  ((%bsm-pinp :accessor bsm-pinp
+              :initarg :bsm-pinp
+              :initform nil)
+   (%bsm-loc :accessor bsm-loc
              :initarg :bsm-loc
              :type vector)))
 
@@ -175,16 +184,15 @@ points must be vectors and of the same length."
 
 
 (cl-defmethod bsm-desc-entity ((entity bsm-entity-buffer))
-  (format "entity-buffer[loc: %s buffer: %s]"
-          (bsm-loc entity) (bsm-buffer entity)))
+  (format "entity-buffer: P: %s, L: %s, B: %s"
+          (if (bsm-pinp entity) "y" "n")
+          (bsm-loc entity)
+          (bsm-buffer entity)))
 
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setup
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; For now I'm just shoving one space in later it'll be a collection
-(defvar *bsm-buffer-space-spaces* (make-hash-table :test 'equal))
 
 ;; each grouping of buffers should probably be EIEIO container
 ;; TODO
@@ -199,14 +207,17 @@ points must be vectors and of the same length."
              (let ((x (mod i rect-edge-length))
                    (y (/ i rect-edge-length)))
                (puthash (vector x y)
-                        (bsm-entity-buffer :bsm-loc (vector x y)
+                        (bsm-entity-buffer :bsm-pinp nil
+                                           :bsm-loc (vector x y)
                                            :bsm-buffer buf)
                         *bsm-buffer-space-spaces*)))
     *bsm-buffer-space-spaces*))
 
-(defun bsmg-dump-buffer-space ()
+(defun bsm-dump-buffer-space ()
+  (princ (format ";; The buffer-space contains %s entities:\n"
+                 (hash-table-count *bsm-buffer-space-spaces*)))
   (maphash (lambda (loc ent)
-             (princ (format ";; %s -> %s\n" loc (bsm-desc-entity ent))))
+             (princ (format ";;  %s -> %s\n" loc (bsm-desc-entity ent))))
            *bsm-buffer-space-spaces*))
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
