@@ -136,7 +136,8 @@ on the stack). This function looks explicitly for bsm- prefixed names."
 ;; used with (and it actually is) bsm-error
 (defun bsm-error (fmt &rest args)
   "Call error with the fmt and args, but try to find the most recently
-enclosing function prefixed with bsm- and put it into the error message."
+enclosing function prefixed with bsm- along with a userful stack
+trace and put it into the error message."
   (apply 'error (concat "BSM Error: Stack: %s, Message: " fmt)
          ;; Emit a nice list with arrows in it to help understand what it is.
          (cl-loop for func on (bsm-get-bsm-caller-of 'bsm-error)
