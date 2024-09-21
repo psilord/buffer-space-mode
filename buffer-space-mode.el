@@ -32,13 +32,13 @@
 (defun bsm-snapshot-stack ()
   "Return a vector with index 0 being the inner most stack frame containing
 the call to this function."
-  (let* ((bt (vector))
+  (let* ((bt nil)
          (frame-num 0))
     (mapbacktrace
-     (lambda (a b c d)
-       (setq bt (vconcat bt (list (list frame-num (list a b c d)))))
+     (lambda (evald func args flags)
+       (push (list frame-num (list evald func args flags)) bt)
        (incf frame-num)))
-    bt))
+    (map 'vector 'identity (nreverse bt))))
 
 ;; used with bsm-error
 (defun bsm-find-frame-num (selector-func bt start-index)
