@@ -74,7 +74,7 @@ on the stack). This function looks explicitly for bsm- prefixed names."
          (caller-of (if caller-of caller-of 'bsm-get-bsm-caller-of))
          (bsm-func-stack nil))
 
-    ;; Debugging, enable to t when you want to see more detail.
+    ;; TODO: a choice to enable to t when you want to see more detail.
     (when nil
       (princ (format ";; Full backtrace has %s frame(s):\n" (length bt)))
       (princ ";; -------------------\n")
@@ -121,13 +121,22 @@ on the stack). This function looks explicitly for bsm- prefixed names."
     ;; 2. starting at this frame, collect all of the bsm- function going back
     ;; to the outermost frame.
     (setq bsm-func-stack
-          (mapcar (lambda (frame-spec) (second (second frame-spec)))
-                  (bsm-collect-frames
-                   (lambda (evald func args flags)
-                     (and (eql 't evald)
-                          (string-prefix-p "bsm-" (symbol-name func))))
-                   bt
-                   target-frame-num)))
+          (mapcar
+           (lambda (frame-spec)
+             ;; TODO: A choice here to include arguments or not,
+             ;; currently disabled.
+             (if t
+                 (second (second frame-spec))
+               (list* (second (second frame-spec))
+                      (third (second frame-spec)))))
+
+           ;; And the list of bsm- frames of interest.
+           (bsm-collect-frames
+            (lambda (evald func args flags)
+              (and (eql 't evald)
+                   (string-prefix-p "bsm-" (symbol-name func))))
+            bt
+            target-frame-num)))
 
     ;; The first one is the caller of the caller-of frame. Then, it continues
     ;; to the most outer frame, but only of bsm- prefixed functions.
