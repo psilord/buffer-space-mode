@@ -128,7 +128,7 @@ on the stack). This function looks explicitly for bsm- prefixed names."
                    bt
                    target-frame-num)))
 
-    ;; The first one is the caller of the caller-of frame. Then, ir continues
+    ;; The first one is the caller of the caller-of frame. Then, it continues
     ;; to the most outer frame, but only of bsm- prefixed functions.
     bsm-func-stack))
 
