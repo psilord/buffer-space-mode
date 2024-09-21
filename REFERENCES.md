@@ -39,9 +39,9 @@
 
 (delete-overlay *bsm-xxx*)
 
-;; NOTE: There is some disagreement if the overlay is actuaally
+;; NOTE: There is some disagreement if the overlay is actually
 ;; deleted and reclaimable by the garbage collector or if it is
 ;; hiding out somewhere in some list making all overlays slower
-;; ald slower. So, buffer-space should best make one or two overlays
-;; that it moves areound and changes the contents of.
+;; and slower. So, buffer-space should at best make one or two overlays
+;; that it moves around, displays, and changes the contents of as needed.
 ```
