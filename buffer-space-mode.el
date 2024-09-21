@@ -166,7 +166,8 @@ trace and put it into the error message."
 points must be vectors and of the same length."
   (if (/= (length p0) (length p1))
       (bsm-error "Dimension mismatch: p0: %s p1: %s" p0 p1))
-  (sqrt (reduce '+ (map 'vector '- p1 p0))))
+  (sqrt (reduce '+ (map 'vector (lambda (x) (expt x 2))
+                        (map 'vector '- p1 p0)))))
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Types
