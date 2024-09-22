@@ -19,7 +19,7 @@
 ;; is going on in it.
 
 (overlay-put *bsm-xxx* 'face
-             '(:background "blue") (:foreground "yellow"))
+             '((:background "blue") (:foreground "yellow")))
 
 ;; You should see the color change.
 
