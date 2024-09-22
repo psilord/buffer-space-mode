@@ -280,3 +280,16 @@ points must be vectors and of the same length."
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Overlay Prototyping Code
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; For now, I will supply a specific window into which the overlay should go.
+
+(defun test-overlay (win)
+
+  ;; 0. Get rectangular geometry of the body of the window.
+  ;; 1. Calculate where overlay inner rectangle will go in that body
+  ;; 2. Find line pos of first line of subrectangle and of line after it.
+  ;; 3. construct overlay which fills the entire width and height.
+
+  ;; KEEP GOING.
+
+  nil)
