@@ -283,7 +283,48 @@ points must be vectors and of the same length."
 
 ;; For now, I will supply a specific window into which the overlay should go.
 
-(defun test-overlay (win)
+(defvar *bsm-ov-test-buffer* nil)
+(defvar *bsm-ov-test-overlay* nil)
+
+(defun test-ov-0-create ()
+
+
+  (setq *bsm-ov-test-buffer* (get-buffer-create "foo.txt"))
+
+  (with-current-buffer *bsm-ov-test-buffer*
+    (insert "This is a piece of text.\n")
+    (insert "It has a couple of lines.\n")
+    (insert "Multiple lines of text are a good thing.\n"))
+
+  (setq *bsm-ov-test-overlay* (make-overlay 1 16 *bsm-ov-test-buffer*))
+
+  ;; Then open the buffer in another frame/window do you can see what
+  ;; is going on in it.
+
+  (overlay-put *bsm-ov-test-overlay* 'face '((:background "blue")
+                                             (:foreground "yellow")))
+
+  ;; You should see the color change.
+
+  ;; Then, let's change what's in the overlay. We will keep the size
+  ;; of the change exactly how big the overlay is.
+
+  (overlay-put *bsm-ov-test-overlay* 'display "|----FOOBAR---|")
+
+  ;; You should see the text change.
+
+  ;; This will undo it:
+  ;;(overlay-put *bsm-ov-test-overlay* 'display nil)
+
+  ;; Evaluating the two 'display lines alternately will swap them.
+
+  )
+
+(defun test-ov-0-destroy ()
+  ;; Then we delete the overlay
+  (delete-overlay *bsm-ov-test-overlay*))
+
+(defun test-ov-1-create (win)
 
   ;; 0. Get rectangular geometry of the body of the window.
   ;; 1. Calculate where overlay inner rectangle will go in that body
@@ -292,4 +333,4 @@ points must be vectors and of the same length."
 
   ;; KEEP GOING.
 
-  nil)
+  )
