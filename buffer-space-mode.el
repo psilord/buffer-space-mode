@@ -288,15 +288,18 @@ points must be vectors and of the same length."
 
 (defun test-ov-0-create ()
 
-
+  ;; find or make the new buffer.
   (setq *bsm-ov-test-buffer* (get-buffer-create "foo.txt"))
 
   (with-current-buffer *bsm-ov-test-buffer*
+    (erase-buffer)
     (insert "This is a piece of text.\n")
     (insert "It has a couple of lines.\n")
     (insert "Multiple lines of text are a good thing.\n"))
 
-  (setq *bsm-ov-test-overlay* (make-overlay 1 16 *bsm-ov-test-buffer*))
+  (if *bsm-ov-test-overlay*
+      (move-overlay *bsm-ov-test-overlay* 1 16 *bsm-ov-test-buffer*)
+    (setq *bsm-ov-test-overlay* (make-overlay 1 16 *bsm-ov-test-buffer*)))
 
   ;; Then open the buffer in another frame/window do you can see what
   ;; is going on in it.
@@ -306,23 +309,33 @@ points must be vectors and of the same length."
 
   ;; You should see the color change.
 
+  )
+
+(defun test-ov-0-show ()
   ;; Then, let's change what's in the overlay. We will keep the size
   ;; of the change exactly how big the overlay is.
 
-  (overlay-put *bsm-ov-test-overlay* 'display "|----FOOBAR---|")
+  (overlay-put *bsm-ov-test-overlay*
+               'display
+               ;; 16 characters.
+               "|----FOOBAR---|")
 
   ;; You should see the text change.
-
-  ;; This will undo it:
-  ;;(overlay-put *bsm-ov-test-overlay* 'display nil)
-
-  ;; Evaluating the two 'display lines alternately will swap them.
-
   )
+
+(defun test-ov-0-hide ()
+
+  ;; This will hide the inserted text, revealing the original text.
+  (overlay-put *bsm-ov-test-overlay* 'display nil)
+
+  ;; You should see the text change.
+  )
+
 
 (defun test-ov-0-destroy ()
   ;; Then we delete the overlay
-  (delete-overlay *bsm-ov-test-overlay*))
+  (delete-overlay *bsm-ov-test-overlay*)
+  (setq *bsm-ov-test-overlay* nil))
 
 (defun test-ov-1-create (win)
 
