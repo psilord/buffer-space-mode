@@ -21,8 +21,10 @@
 ;;; Globals
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; For now I'm just shoving one space in later it'll be a collection
-(defvar *bsm-buffer-space-spaces* (make-hash-table :test 'equal))
+;; For now, this is a vector of hash tables that describe spaces
+;;
+(defvar *bsm-buffer-space-spaces* (vector
+                                   (make-hash-table :test 'equal)))
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; The bsm-error handling system and associated functions
@@ -37,7 +39,7 @@ the call to this function."
     (mapbacktrace
      (lambda (evald func args flags)
        (push (list frame-num (list evald func args flags)) bt)
-       (incf frame-num)))
+       (cl-incf frame-num)))
     (map 'vector 'identity (nreverse bt))))
 
 ;; used with bsm-error
@@ -211,7 +213,8 @@ points must be vectors and of the same length."
 
 (defun bsm-seed-buffer-space-spaces ()
   "Seeds the *bsm-buffer-space-spaces* attempts to make a square."
-  (setf *bsm-buffer-space-spaces* (make-hash-table :test 'equal))
+  (setf *bsm-buffer-space-spaces* (vector
+                                   (make-hash-table :test 'equal)))
   (let* ((buffers (buffer-list))
          (rect-edge-length (ceiling (sqrt (length buffers)))))
     (cl-loop for i below (length buffers)
@@ -222,15 +225,29 @@ points must be vectors and of the same length."
                         (bsm-entity-buffer :bsm-pinp nil
                                            :bsm-loc (vector x y)
                                            :bsm-buffer buf)
-                        *bsm-buffer-space-spaces*)))
+                        (elt *bsm-buffer-space-spaces* 0))))
     *bsm-buffer-space-spaces*))
 
-(defun bsm-dump-buffer-space ()
-  (princ (format ";; The buffer-space contains %s entities:\n"
-                 (hash-table-count *bsm-buffer-space-spaces*)))
-  (maphash (lambda (loc ent)
-             (princ (format ";;  %s -> %s\n" loc (bsm-desc-entity ent))))
-           *bsm-buffer-space-spaces*))
+(defun bsm-dump-buffer-space (&optional pos)
+  "Display a dump of current buffers at desktop at position pos."
+  (let* ((pos (or pos 0))
+         (spaces (elt *bsm-buffer-space-spaces* pos)))
+    (princ (format ";; The buffer-space contains %s entities:\n"
+                   (hash-table-count spaces)))
+    (maphash (lambda (loc ent)
+               (princ (format ";;  %s -> %s\n" loc (bsm-desc-entity ent))))
+             spaces)))
+
+;; We will use the first element for now, later we need to pick one
+(defun bsm-buffer-position (buffer &optional pos)
+  "Given a buffer (name OR object) in vector position pos return [x y]"
+  (setf pos (or pos 0))
+  (let ((current-workspace (elt *bsm-buffer-space-spaces* pos))
+        (buffer (get-buffer buffer))) ; We need to use str of buffer
+    (cl-loop for key in (hash-table-keys current-workspace)
+             do (when (equal buffer (bsm-buffer
+                                     (gethash key current-workspace)))
+                  (return key)))))
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Movement functions (interactive to hook to keys)
