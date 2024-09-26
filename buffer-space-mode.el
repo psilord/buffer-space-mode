@@ -14,8 +14,20 @@
   :keymap '(([left] . bsm-look-left)
             ([right] . bsm-look-right)
             ([up] . bsm-look-up)
-            ([down] . bsm-look-down))
-  )
+            ([down] . bsm-look-down)))
+
+;; For testing
+(define-key global-map (kbd "C-c h") 'bsm-look-left)
+(define-key global-map (kbd "C-c l") 'bsm-look-right)
+(define-key global-map (kbd "C-c k") 'bsm-look-up)
+(define-key global-map (kbd "C-c j") 'bsm-look-down)
+
+
+(defun my-python-mode-keybindings ()
+  "Custom keybindings for Python mode."
+  (define-key python-mode-map (kbd "C-c C-r") 'run-python))
+
+(add-hook 'python-mode-hook 'my-python-mode-keybindings)
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Globals
@@ -209,7 +221,7 @@ points must be vectors and of the same length."
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; each grouping of buffers should probably be EIEIO container
-;; TODO
+
 
 (defun bsm-seed-buffer-space-spaces ()
   "Seeds the *bsm-buffer-space-spaces* attempts to make a square."
@@ -221,12 +233,16 @@ points must be vectors and of the same length."
              for buf in buffers do
              (let ((x (mod i rect-edge-length))
                    (y (/ i rect-edge-length)))
-               (puthash (vector x y)
+               (puthash `(,x ,y)
                         (bsm-entity-buffer :bsm-pinp nil
                                            :bsm-loc (vector x y)
                                            :bsm-buffer buf)
                         (elt *bsm-buffer-space-spaces* 0))))
     *bsm-buffer-space-spaces*))
+
+
+;; TODO - you'll see a lot of pos below which is the index of the current workspace
+;; this should probably be a global
 
 (defun bsm-dump-buffer-space (&optional pos)
   "Display a dump of current buffers at desktop at position pos."
@@ -249,49 +265,92 @@ points must be vectors and of the same length."
                                      (gethash key current-workspace)))
                   (return key)))))
 
+(defun bsm-hash-keep (function hash-table)
+  "Filters a hash table keeping entries. keeping predicate should accept key and value."
+  (let ((temp (make-hash-table :test (hash-table-test hash-table))))
+    (cl-loop for key being the hash-keys of hash-table
+             for temp-value = (gethash key hash-table)
+             when (funcall function key temp-value) do
+             (puthash key temp-value temp))
+    temp))
+
+;; TODO unify these into one that dispatches on x or y
+(defun bsm-get-aligned-x (x &optional pos)
+  "Gets a sorted list of all positions aligned with x. Pos is current workspace."
+  (setf pos (or pos 0))
+  (let* ((buffers-map (elt *bsm-buffer-space-spaces* pos))
+         (key-list (hash-table-keys buffers-map))
+         (final-list
+          (cl-loop for (xx y)
+                   in key-list
+                   when (= x xx)
+                   collect (list xx y)
+                   into pts-list
+                   finally (return (sort pts-list (lambda (a b)
+                                                    (>= (car a) (car b))))))))
+    (setcdr (last final-list) final-list)))
+
+(defun bsm-get-aligned-y (y &optional pos)
+  "Gets a sorted list of all positions aligned with x. Pos is current workspace."
+  (setf pos (or pos 0))
+  (let* ((buffers-map (elt *bsm-buffer-space-spaces* pos))
+         (key-list (hash-table-keys buffers-map))
+         (final-list
+          (cl-loop for (x yy)
+                   in key-list
+                   when (= y yy)
+                   collect (list x yy)
+                   into pts-list
+                   finally (return (sort pts-list (lambda (a b)
+                                                    (>= (cadr a) (cadr b))))))))
+    (setcdr (last final-list) final-list)))
+
+
+;; TODO see if we can reduce some of the guts of these
+(defun bsm-move-horizontally (offset &optional pos)
+  (setf pos (or pos 0))
+  (let* ((buffers-map (elt *bsm-buffer-space-spaces* pos))
+         (old-buffer (window-buffer (selected-window)))
+         (current-xy-pos (bsm-buffer-position old-buffer pos))
+         (x (car current-xy-pos))
+         (xy-list (bsm-get-aligned-x x pos))
+         (x-index (cl-position current-xy-pos xy-list :test #'equal))
+         (next-buffer (bsm-buffer (gethash (elt xy-list (+ x-index offset))
+                               buffers-map))))
+    (switch-to-buffer next-buffer nil t)))
+    
+    
+(defun bsm-move-vertically (offset &optional pos)
+  (setf pos (or pos 0))
+  (let* ((buffers-map (elt *bsm-buffer-space-spaces* pos))
+         (old-buffer (window-buffer (selected-window)))
+         (current-xy-pos (bsm-buffer-position old-buffer pos))
+         (y (cadr current-xy-pos))
+         (xy-list (bsm-get-aligned-y y pos))
+         (y-index (cl-position current-xy-pos xy-list :test #'equal))
+         (next-buffer (bsm-buffer (gethash (elt xy-list (+ y-index offset))
+                               buffers-map))))
+    (switch-to-buffer next-buffer nil t)))
+
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Movement functions (interactive to hook to keys)
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun bsm-look-left ()
   (interactive)
-  (print "Looking left.")
-  )
-
-(defun bsm-look-down-left ()
-  (interactive)
-  (print "Looking bottom left.")
-  )
+  (bsm-move-horizontally -1))
 
 (defun bsm-look-down ()
   (interactive)
-  (print "Looking bottom.")
-  )
-
-(defun bsm-look-down-right ()
-  (interactive)
-  (print "Looking bottom right.")
-  )
+  (bsm-move-vertically 1))
 
 (defun bsm-look-right ()
   (interactive)
-  (print "Looking right.")
-  )
-
-(defun bsm-look-up-right ()
-  (interactive)
-  (print "Looking top right.")
-  )
+  (bsm-move-horizontally 1))
 
 (defun bsm-look-up ()
   (interactive)
-  (print "Looking top.")
-  )
-
-(defun bsm-look-up-left ()
-  (interactive)
-  (print "Looking top left.")
-  )
+  (bsm-move-vertically -1))
 
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
