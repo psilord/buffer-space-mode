@@ -305,24 +305,32 @@ points must be vectors and of the same length."
 
 (defun test-ov-0-create ()
 
-  ;; find or make the new buffer.
-  (setq *bsm-ov-test-buffer* (get-buffer-create "foo.txt"))
+  (let ((name "foo.txt"))
 
-  (with-current-buffer *bsm-ov-test-buffer*
-    (erase-buffer)
-    (insert "This is a piece of text.\n")
-    (insert "It has a couple of lines.\n")
-    (insert "Multiple lines of text are a good thing.\n"))
+    ;; find or make the new buffer.
+    (setq *bsm-ov-test-buffer* (get-buffer-create name))
 
-  (if *bsm-ov-test-overlay*
-      (move-overlay *bsm-ov-test-overlay* 1 16 *bsm-ov-test-buffer*)
-    (setq *bsm-ov-test-overlay* (make-overlay 1 16 *bsm-ov-test-buffer*)))
+    (with-current-buffer *bsm-ov-test-buffer*
+      (erase-buffer)
+      (insert "This is a piece of text.\n")
+      (insert "It has a couple of lines.\n")
+      (insert "Multiple lines of text are a good thing.\n"))
 
-  ;; Then open the buffer in another frame/window do you can see what
-  ;; is going on in it.
+    (let* ((the-window (get-buffer-window name t))
+           (start-pos (window-start the-window))
+           (end-pos (window-end the-window)))
+      (if *bsm-ov-test-overlay*
+          (move-overlay *bsm-ov-test-overlay* start-pos end-pos
+                        *bsm-ov-test-buffer*)
+        (setq *bsm-ov-test-overlay* (make-overlay start-pos end-pos
+                                                  *bsm-ov-test-buffer*))))
 
-  (overlay-put *bsm-ov-test-overlay* 'face '((:background "blue")
-                                             (:foreground "yellow")))
+    ;; Then open the buffer in another frame/window do you can see what
+    ;; is going on in it.
+
+    (overlay-put *bsm-ov-test-overlay* 'face '((:background "blue")
+                                               (:foreground "yellow")
+                                               (:extend t))))
 
   ;; You should see the color change.
 
