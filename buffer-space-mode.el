@@ -318,8 +318,8 @@ points must be vectors and of the same length."
          (next-buffer (bsm-buffer (gethash (elt xy-list (+ x-index offset))
                                buffers-map))))
     (switch-to-buffer next-buffer nil t)))
-    
-    
+
+
 (defun bsm-move-vertically (offset &optional pos)
   (setf pos (or pos 0))
   (let* ((buffers-map (elt *bsm-buffer-space-spaces* pos))
@@ -358,6 +358,10 @@ points must be vectors and of the same length."
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; For now, I will supply a specific window into which the overlay should go.
+
+;;; ;;;;;;;;;;;;;;;;
+;;; Test 0
+;;; ;;;;;;;;;;;;;;;;
 
 (defvar *bsm-ov-test-buffer* nil)
 (defvar *bsm-ov-test-overlay* nil)
@@ -421,13 +425,22 @@ points must be vectors and of the same length."
   (delete-overlay *bsm-ov-test-overlay*)
   (setq *bsm-ov-test-overlay* nil))
 
+;;; ;;;;;;;;;;;;;;;;
+;;; Test 1
+;;; ;;;;;;;;;;;;;;;;
+
 (defun test-ov-1-create (win)
 
-  ;; 0. Get rectangular geometry of the body of the window.
-  ;; 1. Calculate where overlay inner rectangle will go in that body
-  ;; 2. Find line pos of first line of subrectangle and of line after it.
-  ;; 3. construct overlay which fills the entire width and height.
+  ;; 0. Get rectangular geometry of the body of the current window.
+  ;; 1. Save the buffer currently active in the window.
+  ;; 2. Create a new buffer and fill it totally with spaces so it fills
+  ;;    the body of the current window.
+  ;; 3. Draw the ascii UI over it, possibly in a sub rectangle with images
+  ;;    of each buffer you are skimming over behind it.
 
   ;; KEEP GOING.
 
+  (let* ((bsm-ui (get-buffer "buffer-space-mode"))
+         (win (selected-window)))
+    )
   )
