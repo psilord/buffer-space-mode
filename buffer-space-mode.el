@@ -316,7 +316,7 @@ points must be vectors and of the same length."
          (xy-list (bsm-get-aligned-x x pos))
          (x-index (cl-position current-xy-pos xy-list :test #'equal))
          (next-buffer (bsm-buffer (gethash (elt xy-list (+ x-index offset))
-                               buffers-map))))
+                                           buffers-map))))
     (switch-to-buffer next-buffer nil t)))
 
 
@@ -329,7 +329,7 @@ points must be vectors and of the same length."
          (xy-list (bsm-get-aligned-y y pos))
          (y-index (cl-position current-xy-pos xy-list :test #'equal))
          (next-buffer (bsm-buffer (gethash (elt xy-list (+ y-index offset))
-                               buffers-map))))
+                                           buffers-map))))
     (switch-to-buffer next-buffer nil t)))
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -366,7 +366,7 @@ points must be vectors and of the same length."
 (defvar *bsm-ov-test-buffer* nil)
 (defvar *bsm-ov-test-overlay* nil)
 
-(defun test-ov-0-create ()
+(defun bsm-test-ov-0-create ()
 
   (let ((name "foo.txt"))
 
@@ -399,7 +399,7 @@ points must be vectors and of the same length."
 
   )
 
-(defun test-ov-0-show ()
+(defun bsm-test-ov-0-show ()
   ;; Then, let's change what's in the overlay. We will keep the size
   ;; of the change exactly how big the overlay is.
 
@@ -411,7 +411,7 @@ points must be vectors and of the same length."
   ;; You should see the text change.
   )
 
-(defun test-ov-0-hide ()
+(defun bsm-test-ov-0-hide ()
 
   ;; This will hide the inserted text, revealing the original text.
   (overlay-put *bsm-ov-test-overlay* 'display nil)
@@ -420,7 +420,7 @@ points must be vectors and of the same length."
   )
 
 
-(defun test-ov-0-destroy ()
+(defun bsm-test-ov-0-destroy ()
   ;; Then we delete the overlay
   (delete-overlay *bsm-ov-test-overlay*)
   (setq *bsm-ov-test-overlay* nil))
@@ -429,7 +429,40 @@ points must be vectors and of the same length."
 ;;; Test 1
 ;;; ;;;;;;;;;;;;;;;;
 
-(defun test-ov-1-create (win)
+(defclass bsm-framebuffer ()
+  ((%bsm-rows :accessor bsm-rows
+              :initarg :bsm-rows)
+   (%bsm-cols :accessor bsm-cols
+              :initarg :bsm-cols)
+   (%bsm-store :accessor bsm-store
+               :initarg :bsm-store)))
+
+
+(defun bsm-make-framebuffer (rows cols &optional init-char)
+  (princ "making framebuffer")
+  (make-instance 'bsm-framebuffer
+                 :bsm-rows rows
+                 :bsm-cols cols
+                 :bsm-store (make-string (* rows cols)
+                                         (or init-char ?\s))))
+
+(defun bsm-get-item (fb row col)
+  (elt (bsm-store fb) (+ (* (bsm-cols fb) row) col)))
+
+(defun bsm-set-item (fb row col item)
+  (setf (elt (bsm-store fb) (+ (* (bsm-cols fb) row) col)) item))
+
+(defun bsm-render (fb the-buffer )
+  (with-current-buffer the-buffer
+    (erase-buffer)
+    (cl-loop for row from 0 below (bsm-rows fb)
+             do (cl-loop for col from 0 below (bsm-cols fb)
+                         do (insert (bsm-get-item fb row col)))
+             ;; NOTE: Last column is dedicated to newlines in the store.
+             ;; Otherwise the fringe might show up. Fix it later.
+             (insert ?\n))))
+
+(defun bsm-test-ov-1-create ()
 
   ;; 0. Get rectangular geometry of the body of the current window.
   ;; 1. Save the buffer currently active in the window.
@@ -440,7 +473,21 @@ points must be vectors and of the same length."
 
   ;; KEEP GOING.
 
-  (let* ((bsm-ui (get-buffer "buffer-space-mode"))
-         (win (selected-window)))
+  (let* ((ui (get-buffer-create "bsm-ui"))
+         (fb (bsm-make-framebuffer (window-body-height)
+                                   ;; save a column for newlines, unfortunately
+                                   (1- (window-body-width))
+                                   ?.)))
+
+    ;; Is this actually a useful thing? Or should I just use a buffer itself
+    ;; as the "store" for the data?
+    (bsm-set-item fb 0 0 ?*)
+    (bsm-set-item fb (1- (bsm-rows fb)) (1- (bsm-cols fb)) ?@)
+    (bsm-render fb ui)
+
+    (switch-to-buffer ui nil t)
+
     )
+
+  (set-window-point (selected-window) 0)
   )
