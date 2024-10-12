@@ -33,10 +33,9 @@
 ;;; Globals
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; For now, this is a vector of hash tables that describe spaces
+;; For now, there is a single buffer space.
 ;;
-(defvar *bsm-buffer-space-spaces* (vector
-                                   (make-hash-table :test 'equal)))
+(defvar *bsm-buffer-space* nil)
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; The bsm-error handling system and associated functions
@@ -184,6 +183,9 @@ trace and put it into the error message."
 ;;; Utilities
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defun bsm-format-ind (indent fmt &rest objects)
+  (apply 'format (concat (make-string indent ? ) fmt) objects))
+
 (defun bsm-euclidean-distance (p0 p1)
   "Return the Euclidean distance between two points p0 and p1. The
 points must be vectors and of the same length."
@@ -192,74 +194,374 @@ points must be vectors and of the same length."
   (sqrt (reduce '+ (map 'vector (lambda (x) (expt x 2))
                         (map 'vector '- p1 p0)))))
 
+;; The MIDT is a special hash table implementation.
+
+(defclass bsm-midt ()
+  ;; A hash table that allows easy lookup/management by the KEY or the VALUE.
+  ((%bsm-midt-not-found-value :reader bsm-midt-not-found-value
+                              :initform (gensym "bsm-midt-not-found-value-"))
+   (%bsm-midt-by-key :reader bsm-midt-by-key
+                     :initarg :bsm-midt-by-key
+                     ;; NOTE: hashtable of: KEY -> VALUE
+                     :initform nil)
+   (%bsm-midt-by-value :reader bsm-midt-by-value
+                       :initarg :bsm-midt-by-value
+                       ;; NOTE: hashtable of: VALUE -> (cons KEY VALUE)
+                       :initform nil)))
+
+(defun bsm-midt-found-p (item midt)
+  (not (eq item (bsm-midt-not-found-value midt))))
+
+(defun bsm-midt-make (by-key-test by-value-test)
+  (bsm-midt :bsm-midt-by-key (make-hash-table :test by-key-test)
+            :bsm-midt-by-value (make-hash-table :test by-value-test)))
+
+(defun bsm-midt-put (key value midt)
+  (puthash key value (bsm-midt-by-key midt))
+  (puthash value (cons key value) (bsm-midt-by-value midt)))
+
+(defun bsm-midt-get (key-or-value midt &optional default)
+  "Will return the associated entry from the mitbl given the key-or-value.
+If it is not present return the default."
+  (let* ((item-by-key (gethash key-or-value (bsm-midt-by-key midt)
+                               (bsm-midt-not-found-value midt))))
+    (if (bsm-midt-found-p item-by-key midt)
+        item-by-key
+      (let ((item-by-value (gethash key-or-value (bsm-midt-by-value midt)
+                                    (bsm-midt-not-found-value midt))))
+        (if (bsm-midt-found-p item-by-value midt)
+            (cdr item-by-value)
+          default)))))
+
+(defun bsm-midt-remhash (key-or-value midt)
+  (catch 'early-exit
+    (let ((item-by-key (gethash key-or-value (bsm-midt-by-key midt)
+                                (bsm-midt-not-found-value midt))))
+      (when (bsm-midt-found-p item-by-key midt)
+        ;; If we found it by the key, then synchronize the by-value table.
+        (remhash key-or-value (bsm-midt-by-key midt))
+        (remhash item-by-key (bsm-midt-by-value midt))
+        (throw 'early-exit nil)))
+
+    ;; Check if we find it by value.
+    (let ((item-by-value (gethash key-or-value (bsm-midt-by-value midt)
+                                  (bsm-midt-not-found-value midt))))
+      (when (bsm-midt-found-p item-by-value midt)
+        ;; If we found it by the value, then synchronize the by-key table.
+        (remhash (car item-by-value) (bsm-midt-by-key midt))
+        (remhash (cdr item-by-value) (bsm-midt-by-value midt))))))
+
+
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Types
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; --------------------------------
+
+(defclass bsm-id ()
+  ;; mixin class to give things name, nicks, short names, how those names might
+  ;; be rendered, etc, etc.
+  ((%bsm-id-use-name-p :accessor bsm-id-use-name-p
+                       :initarg :bsm-id-use-name-p
+                       :initform nil)
+   (%bsm-id-name :accessor bsm-id-name
+                 :initarg :bsm-id-name
+                 :initform nil)))
+
+;; --------------------------------
+
+;; An entity a thing stored in a view. Often it is a buffer that you can
+;; switch to or a reference to some other thing like a different buffer-view.
 (defclass bsm-entity ()
-  ((%bsm-pinp :accessor bsm-pinp
-              :initarg :bsm-pinp
-              :initform nil)
-   (%bsm-loc :accessor bsm-loc
-             :initarg :bsm-loc
-             :type vector)))
+  ((%bsm-entity-id :reader bsm-entity-id
+                   :initarg :bsm-entity-id
+                   :initform (bsm-id))))
 
-(defclass bsm-entity-buffer (bsm-entity)
-  ((%bsm-buffer :accessor bsm-buffer
-                :initarg :bsm-buffer)))
+;; A bsm-entity suitable to hold a reference to a buffer.
+(defclass bsm-ent/buf (bsm-entity)
+  ((%bsm-ent/buf-buffer :accessor bsm-ent/buf-buffer
+                        :initarg :bsm-ent/buf-buffer)))
+
+(defun bsm-ent/buf-make (buffer &optional name)
+  "Create and return a bsm-ent/buf object holding the buffer andd
+with the optional name as its name."
+  (let ((ent (bsm-ent/buf :bsm-ent/buf-buffer buffer)))
+    (when name
+      (let ((id (bsm-entity-id ent)))
+        (setf (bsm-id-name id) name
+              (bsm-id-use-name-p id) t)))
+    ent))
+
+;; A bsm-entity suitable to hold a reference to another bsm-view
+(defclass bsm-ent/view (bsm-entity)
+  ((%bsm-ent/view-view :accessor bsm-ent/view-view
+                       :initarg :bsm-ent/view-view)))
+
+;; --------------------------------
+
+;; How we keep track of the location of this entity in a view.
+(defclass bsm-loc ()
+  ((%bsm-loc-x :accessor bsm-loc-x
+               :initarg :bsm-loc-x
+               :initform 0)
+   (%bsm-loc-y :accessor bsm-loc-y
+               :initarg :bsm-loc-y
+               :initform 0)))
+
+(defun bsm-loc-equal (k0 k1)
+  (or (eq k0 k1)
+      (and (= (bsm-loc-x k0) (bsm-loc-x k1))
+           (= (bsm-loc-y k0) (bsm-loc-y k1)))))
+
+(defun bsm-loc-hash (k)
+  (+ (* 19 (bsm-loc-x k))
+     (* 23 (bsm-loc-y k))))
+
+(define-hash-table-test 'bsm-loc-equal/ht 'bsm-loc-equal 'bsm-loc-hash)
+
+(defun bsm-loc-make (x y)
+  (bsm-loc :bsm-loc-x x :bsm-loc-y y))
+
+;; --------------------------------
+
+;; A holder for an entity. It contains buffer-view specific information about
+;; the location of this crate, if it is pinned, default colors and other
+;; attributes (unless over ridden by the contained entity).
+;; NOTE: Crates can NOT be shared across views. But two different crates can
+;; contain the exact same reference to an entity.
+(defclass bsm-crate ()
+  ((%bsm-crate-location :accessor bsm-crate-location
+                        :initarg :bsm-crate-location
+                        :type bsm-loc)
+   (%bsm-crate-pin-p :accessor bsm-crate-pin-p
+                     :initarg :bsm-crate-pin-p
+                     :initform nil)
+   ;; If not specified, leave the back/fore ground color to whatever is in the
+   ;; buffer being rendered into.
+   (%bsm-crate-background-color :accessor bsm-crate-background-color
+                                :initarg :bsm-crate-background-color
+                                :initform nil)
+   (%bsm-crate-foreground-color :accessor bsm-crate-foreground-color
+                                :initarg :bsm-crate-foreground-color
+                                :initform nil)
+   ;; The entity being held by this crate.
+   (%bsm-crate-entity :accessor bsm-crate-entity
+                      :initarg :bsm-crate-entity
+                      :initform nil)))
+
+(defun bsm-crate-make (loc entity)
+  "Construct and return a crate with the specifed location loc and
+entity."
+  (bsm-crate
+   :bsm-crate-location loc
+   :bsm-crate-entity entity))
+
+;; TODO: Check if there is a reinitialize-instance equivalent in eieio and use
+;; that so we can do it with supplying initargs too.
+(defun bsm-crate-reinitialize (crate)
+  "Reinitialize the crate to defaults, EXCEPT the location, and return it."
+  (setf (bsm-crate-pin-p crate) nil
+        (bsm-crate-background-color crate) nil
+        (bsm-crate-foreground-color crate) nil
+        (bsm-crate-entity crate) nil)
+  crate)
 
 
-(cl-defmethod bsm-desc-entity ((entity bsm-entity-buffer))
-  (format "entity-buffer: P: %s, L: %s, B: %s"
-          (if (bsm-pinp entity) "y" "n")
-          (bsm-loc entity)
-          (bsm-buffer entity)))
+;; --------------------------------
 
+;; A trivial bounding box implementation for 2d.
+(defclass bsm-bbox ()
+  ((%bsm-bbox-min-x :accessor bsm-bbox-min-x
+                    :initarg :bsm-bbox-min-x
+                    :initform nil)
+   (%bsm-bbox-max-x :accessor bsm-bbox-max-x
+                    :initarg :bsm-bbox-max-x
+                    :initform nil)
+   (%bsm-bbox-min-y :accessor bsm-bbox-min-y
+                    :initarg :bsm-bbox-min-y
+                    :initform nil)
+   (%bsm-bbox-max-y :accessor bsm-bbox-max-y
+                    :initarg :bsm-bbox-max-y
+                    :initform nil)))
+
+(defun bsm-bbox-expand (bbox loc)
+  "Recompute how big the bbox would be if loc is added to it."
+  ;; Handle min x
+  (if (or (null (bsm-bbox-min-x bbox))
+          (< (bsm-loc-x loc) (bsm-bbox-min-x bbox)))
+      (setf (bsm-bbox-min-x bbox) (bsm-loc-x loc)))
+  ;; Handle max x
+  (if (or (null (bsm-bbox-max-x bbox))
+          (> (bsm-loc-x loc) (bsm-bbox-max-x bbox)))
+      (setf (bsm-bbox-max-x bbox) (bsm-loc-x loc)))
+  ;; Handle min y
+  (if (or (null (bsm-bbox-min-y bbox))
+          (< (bsm-loc-y loc) (bsm-bbox-min-y bbox)))
+      (setf (bsm-bbox-min-y bbox) (bsm-loc-y loc)))
+  ;; Handle max y
+  (if (or (null (bsm-bbox-max-y bbox))
+          (> (bsm-loc-y loc) (bsm-bbox-max-y bbox)))
+      (setf (bsm-bbox-max-y bbox) (bsm-loc-y loc))))
+
+;; --------------------------------
+
+;; A view holds a sparse (usually) 2d sheet of crates and function (eventually)
+;; to place those crates into locations in the view. Each crate holds a single
+;; entity.  The view is responsible for tracking the crates, their locations,
+;; and the location of the cursor the user of the view is using to navigate
+;; the view.
+(defclass bsm-view ()
+  (;; Identifies the view, the name MUST be used and set.
+   (%bsm-view-id :reader bsm-view-id
+                 :initarg :bsm-view-id
+                 :initform (bsm-id))
+   ;; a single collection of crates in a sparse geometric indexing
+   (%bsm-view-crates :reader bsm-view-crates
+                     :initarg :bsm-view-crates
+                     ;; KEY: location, VALUE: crate
+                     :initform (make-hash-table :test 'bsm-loc-equal/ht))
+   ;; The minimal bounding box containing all the points.
+   (%bsm-view-bbox :reader bsm-view-bbox
+                   :initarg :bsm-view-bbox
+                   :initform (bsm-bbox))
+   ;; The cursor location in this view.
+   (%bsm-view-cursor-location :accessor bsm-view-cursor-location
+                              :initarg :bsm-view-cursor-location
+                              ;; TODO: What to do for location abstraction?
+                              :initform (bsm-loc-make 0 0))))
+
+(defun bsm-view-assert-name (view)
+  "Check that a bsm-view instance has a defined name."
+  (let ((name (bsm-id-name (bsm-view-id view))))
+    (unless (and name (not (string= name "")))
+      (bsm-error "The bsm-view instance must have a proper name: %s" view))
+    view))
+
+(defun bsm-view-make (name)
+  "Make an empty bsm-view with the supplied name. Ensure name is not NIL"
+  (let ((view (bsm-view :bsm-view-id (bsm-id :bsm-id-use-name-p t
+                                             :bsm-id-name name))))
+    (bsm-view-assert-name view)))
+
+(defun bsm-view-name (view)
+  "Return the name of the bsm-view."
+  (bsm-id-name (bsm-view-id view)))
+
+(defun bsm-view-put-crate (view crate)
+  "Insert the crate into the view at the location specified in crate."
+  (puthash (bsm-crate-location crate)
+           crate
+           (bsm-view-crates view)))
+
+(defun bsm-view-get-crate (view location &optional ensure)
+  "Return the crate at the location or nil if none. If ensure is t
+then construct an empty crate at the location, insert it into the view,
+and return the new crate."
+  (let ((crate (gethash location (bsm-view-crates view)) nil))
+    (if crate
+        crate
+      (when ensure
+        (bsm-view-put-crate view location
+                            (bsm-crate :bsm-crate-location location))))))
+
+;; --------------------------------
+
+;; This is not fully spec'ed out, just a placeholder for now.
+(defclass bsm-space ()
+  ((%bsm-space-selected-view :accessor bsm-space-selected-view
+                             :initarg :bsm-space-selected-view
+                             :type bsm-view)
+   (%bsm-space-views :reader bsm-space-views
+                     :initarg :bsm-space-views
+                     ;; KEY: bsm-view name, VALUE: bsm-view
+                     :initform (bsm-midt-make 'equal 'eq))))
+
+(defun bsm-space-put-view (space view-or-name &optional select)
+  "If view-or-name is a string, construct a new view by that name and insert it
+into space. If it is a view, then get the name from the view and
+insert it into space. If select is true, then also select this view in the
+space. Return the view."
+  (let ((view
+         (cond
+          ((stringp view-or-name)
+           (bsm-view-make view-or-name))
+          ((bsm-view-p view-or-name)
+           (bsm-view-assert-name view-or-name)
+           view-or-name)
+          (t
+           (bsm-error "view-or-name must be a string or a bsm-view: %s"
+                      view-or-name)))))
+    (bsm-midt-put (bsm-view-name view) view
+                  (bsm-space-views space))
+    (when select
+      (setf (bsm-space-selected-view space) view))
+    view))
+
+(defun bsm-space-get-view (space view-or-name &optional ensure)
+  "Return the view in space identified by view-or-name or nil of not
+present. If ensure is t and it is not present construct the new
+view (or if itis already a view) and add it to the space. Return
+the view."
+  ;; keep going, implement ensure.
+  (let ((view (bsm-midt-get view-or-name (bsm-space-views space) nil)))
+    (if view
+        view
+      (when ensure
+        (bsm-space-put-view space view-or-name)))))
+
+(defun bsm-space-make ()
+  "Create and return an empty bsm-space instance with a single empty
+view named: default."
+  (let* ((new-space (bsm-space))
+         (view-or-name "default")
+         (view (bsm-space-put-view new-space view-or-name t)))
+    new-space))
+
+;; --------------------------------
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setup
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; each grouping of buffers should probably be EIEIO container
-
-
-(defun bsm-seed-buffer-space-spaces ()
-  "Seeds the *bsm-buffer-space-spaces* attempts to make a square."
-  (setf *bsm-buffer-space-spaces* (vector
-                                   (make-hash-table :test 'equal)))
-  (let* ((buffers (buffer-list))
+(defun bsm-seed-buffer-space ()
+  "Seeds the *bsm-buffer-space* and attempts to make it square."
+  (let* ((new-space (bsm-space-make))
+         (selected-view (bsm-space-selected-view new-space))
+         (buffers (buffer-list))
          (rect-edge-length (ceiling (sqrt (length buffers)))))
     (cl-loop for i below (length buffers)
              for buf in buffers do
+             ;; TODO: Technically, space should have a mapping function to
+             ;; select which view something goes into and then the view should
+             ;; have a mapping function that can map the entity to the right
+             ;; location in the buffer and also (maybe a third?) map the right
+             ;; settings into the crate (like colors, etc). That concept is not
+             ;; represented in this code yet.
              (let ((x (mod i rect-edge-length))
                    (y (/ i rect-edge-length)))
-               (puthash `(,x ,y)
-                        (bsm-entity-buffer :bsm-pinp nil
-                                           :bsm-loc (vector x y)
-                                           :bsm-buffer buf)
-                        (elt *bsm-buffer-space-spaces* 0))))
-    *bsm-buffer-space-spaces*))
 
+               ;; Insert an entity into the right location.
+               (let* ((entity (bsm-ent/buf-make buf))
+                      (loc (bsm-loc-make x y))
+                      (crate (bsm-crate-make loc entity)))
+                 (bsm-view-put-crate selected-view crate))))
 
-;; TODO - you'll see a lot of pos below which is the index of the current workspace
-;; this should probably be a global
+    (setf *bsm-buffer-space* new-space)))
 
-(defun bsm-dump-buffer-space (&optional pos)
-  "Display a dump of current buffers at desktop at position pos."
-  (let* ((pos (or pos 0))
-         (spaces (elt *bsm-buffer-space-spaces* pos)))
-    (princ (format ";; The buffer-space contains %s entities:\n"
-                   (hash-table-count spaces)))
-    (maphash (lambda (loc ent)
-               (princ (format ";;  %s -> %s\n" loc (bsm-desc-entity ent))))
-             spaces)))
+;; KEEP GOING
+
+;; TODO - you'll see a lot of pos below which is the index of the current
+;; workspace this should probably be a global
+
+;; squishy methods.
+
 
 ;; We will use the first element for now, later we need to pick one
 (defun bsm-buffer-position (buffer &optional pos)
   "Given a buffer (name OR object) in vector position pos return [x y]"
   (setf pos (or pos 0))
   (let ((current-workspace (elt *bsm-buffer-space-spaces* pos))
-        (buffer (get-buffer buffer))) ; We need to use str of buffer
+        (buffer (get-buffer buffer)))   ; We need to use str of buffer
     (cl-loop for key in (hash-table-keys current-workspace)
              do (when (equal buffer (bsm-buffer
                                      (gethash key current-workspace)))
