@@ -590,16 +590,23 @@ view named: default."
 
     new-space))
 
+(defun bsm-debug-render (display-buffer display-window)
+  "This function assumes it is called in a with-current-buffer form."
+  (let ((time-format "%a %b %d %H:%M:%S %Z %Y\n"))
+    (erase-buffer)
+    (insert (format-time-string time-format (current-time)))
+    (insert (format "The window body (width, height) is: (%s, %s)\n"
+                    (window-body-width) (window-body-height)))))
+
 ;; This function needs a lot of work to behave right.
 (defun bsm-space-render (space)
   (when space
-    (let ((time-format "%a %b %d %H:%M:%S %Z %Y\n")
-          (display-buffer (bsm-space-display-buffer space)))
+    (let ((display-buffer (bsm-space-display-buffer space))
+          (display-window (selected-window)))
       (with-current-buffer display-buffer
-        (erase-buffer)
-        (insert (format-time-string time-format (current-time)))
-        (insert (format "The window body (width, height) is: (%s, %s)\n"
-                        (window-body-width) (window-body-height)))
+        (bsm-debug-render display-buffer display-window)
+
+
         ))))
 
 ;; --------------------------------
