@@ -603,7 +603,8 @@ view named: default."
   (when space
     (let* ((display-buffer (bsm-space-display-buffer space))
            (display-window (selected-window))
-           (body-width (window-body-width))
+           ;; Minus 1 because the last column is reserved for newlines.
+           (body-width (1- (window-body-width)))
            (body-height (window-body-height)))
       (with-current-buffer display-buffer
         ;;(bsm-debug-render display-buffer display-window)
@@ -611,21 +612,21 @@ view named: default."
         (erase-buffer)
         (cl-loop for row from 0 below body-height
                  do (cl-loop
-                     for col from 1 below body-width
+                     for col from 0 below body-width
                      do (cond
                          ((or (and (= row 0)
-                                   (= col 1))
+                                   (= col 0))
                               (and (= row (1- body-height))
                                    (= col (1- body-width)))
                               (and (= row (1- body-height))
-                                   (= col 1))
+                                   (= col 0))
                               (and (= row 0)
                                    (= col (1- body-width))))
                           (insert "+"))
                          ((or (= row 0)
                               (= row (1- body-height)))
                           (insert "-"))
-                         ((or (= col 1)
+                         ((or (= col 0)
                               (= col (1- body-width)))
                           (insert "|"))
                          (t
