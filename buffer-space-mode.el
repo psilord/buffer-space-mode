@@ -4,17 +4,23 @@
 ;; So you call the switcher then move around there
 ;; otherwise we need new keybindings and the mode goes global
 
-
 ;; Modes are called with M-x buffer-space-mode
 ;; However, this might only apply to the localized select buffer
 
+(defconst buffer-space-mode-map
+  ;; NOTE: You can update this, reload the file, and the changed keymap is in
+  ;; effect--which is almost always what you want.
+  (let ((map (make-sparse-keymap)))
+    (define-key map [left] 'bsm-look-left)
+    (define-key map [right] 'bsm-look-right)
+    (define-key map [up] 'bsm-look-up)
+    (define-key map [down] 'bsm-look-down)
+    (define-key map (kbd "<backtab>") 'bsm-render)
+    map))
+
 (define-minor-mode buffer-space-mode
   "A mode to select and load projects geometrically."
-  :lighter "bsm"                        ; shows up in mode line along others
-  :keymap '(([left] . bsm-look-left)
-            ([right] . bsm-look-right)
-            ([up] . bsm-look-up)
-            ([down] . bsm-look-down)))
+  :lighter "bsm")
 
 ;; For testing
 (define-key global-map (kbd "C-c h") 'bsm-look-left)
@@ -22,12 +28,6 @@
 (define-key global-map (kbd "C-c k") 'bsm-look-up)
 (define-key global-map (kbd "C-c j") 'bsm-look-down)
 
-
-(defun my-python-mode-keybindings ()
-  "Custom keybindings for Python mode."
-  (define-key python-mode-map (kbd "C-c C-r") 'run-python))
-
-(add-hook 'python-mode-hook 'my-python-mode-keybindings)
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Globals
@@ -194,6 +194,22 @@ points must be vectors and of the same length."
   (sqrt (reduce '+ (map 'vector (lambda (x) (expt x 2))
                         (map 'vector '- p1 p0)))))
 
+(defun bsm-hash-filter (filter hash-table &optional nil-on-empty)
+  "Filters a hash table keeping entries. keeping predicate should
+accept key and value. Returns the hash table even if it has a
+count of zero UNLESS nil-on-empty is true, in which case nil is
+return in that context."
+  (let ((results (make-hash-table :test (hash-table-test hash-table))))
+    (cl-loop for key being the hash-keys of hash-table
+             for value = (gethash key hash-table)
+             when (funcall filter key value) do
+             (puthash key value results))
+    (if (and nil-on-empty
+             (zerop (hash-table-count results)))
+        nil
+      results)))
+
+
 ;; The MIDT is a special hash table implementation.
 
 (defclass bsm-midt ()
@@ -251,7 +267,6 @@ If it is not present return the default."
         (remhash (car item-by-value) (bsm-midt-by-key midt))
         (remhash (cdr item-by-value) (bsm-midt-by-value midt))))))
 
-
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Types
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -275,17 +290,25 @@ If it is not present return the default."
 (defclass bsm-entity ()
   ((%bsm-entity-id :reader bsm-entity-id
                    :initarg :bsm-entity-id
-                   :initform (bsm-id))))
+                   :initform (bsm-id))
+   ;; An item is the primitive thing we're holding.
+   (%bsm-entity-item :accessor bsm-entity-item
+                     :initarg :bsm-entity-item)))
+
+(defun bsm-entity-has-item (entity item &optional eq-func)
+  "Return true if the item held by the entity is equivalent to the
+supplied item via the eq-func--otherwise return nil."
+  (when entity
+    (funcall (or eq-func 'equal) (bsm-entity-item entity) item)))
+
 
 ;; A bsm-entity suitable to hold a reference to a buffer.
-(defclass bsm-ent/buf (bsm-entity)
-  ((%bsm-ent/buf-buffer :accessor bsm-ent/buf-buffer
-                        :initarg :bsm-ent/buf-buffer)))
+(defclass bsm-ent/buf (bsm-entity) ())
 
 (defun bsm-ent/buf-make (buffer &optional name)
   "Create and return a bsm-ent/buf object holding the buffer andd
 with the optional name as its name."
-  (let ((ent (bsm-ent/buf :bsm-ent/buf-buffer buffer)))
+  (let ((ent (bsm-ent/buf :bsm-entity-item buffer)))
     (when name
       (let ((id (bsm-entity-id ent)))
         (setf (bsm-id-name id) name
@@ -293,9 +316,17 @@ with the optional name as its name."
     ent))
 
 ;; A bsm-entity suitable to hold a reference to another bsm-view
-(defclass bsm-ent/view (bsm-entity)
-  ((%bsm-ent/view-view :accessor bsm-ent/view-view
-                       :initarg :bsm-ent/view-view)))
+(defclass bsm-ent/view (bsm-entity) ())
+
+(defun bsm-ent/view-make (view &optional name)
+  "Create and return a bsm-ent/buf object holding the buffer andd
+with the optional name as its name."
+  (let ((ent (bsm-ent/view :bsm-entity-item view)))
+    (when name
+      (let ((id (bsm-entity-id ent)))
+        (setf (bsm-id-name id) name
+              (bsm-id-use-name-p id) t)))
+    ent))
 
 ;; --------------------------------
 
@@ -309,11 +340,14 @@ with the optional name as its name."
                :initform 0)))
 
 (defun bsm-loc-equal (k0 k1)
+  "Equality tester for two bsm-loc instances. Return T if they are EQ or
+if they represent the exact same coordinate."
   (or (eq k0 k1)
       (and (= (bsm-loc-x k0) (bsm-loc-x k1))
            (= (bsm-loc-y k0) (bsm-loc-y k1)))))
 
 (defun bsm-loc-hash (k)
+  "Hash function for a bsm-loc instance."
   (+ (* 19 (bsm-loc-x k))
      (* 23 (bsm-loc-y k))))
 
@@ -366,6 +400,14 @@ entity."
         (bsm-crate-entity crate) nil)
   crate)
 
+(defun bsm-crate-has-item (crate item &optional eq-func)
+  "Return true if the item held by the entity in the crate is
+equivalent to the supplied item via the eq-func--otherwise return nil."
+  (when crate
+    (when-let ((entity (bsm-crate-entity crate)))
+      (funcall (or eq-func 'equal)
+               (bsm-entity-item entity)
+               item))))
 
 ;; --------------------------------
 
@@ -424,11 +466,14 @@ entity."
    (%bsm-view-bbox :reader bsm-view-bbox
                    :initarg :bsm-view-bbox
                    :initform (bsm-bbox))
-   ;; The cursor location in this view.
+   ;; NOTE: The cursor location in this view. nil means we don't have any idea
+   ;; where the cursor is and need to pick one (hopefully corresponding to the
+   ;; buffer we're doing the request from). If there are more than one crates
+   ;; holding the buffer and we have nil, then randomly pick one, otherwise see
+   ;; if one of the crates matches the current cursor, and of so use that one.
    (%bsm-view-cursor-location :accessor bsm-view-cursor-location
                               :initarg :bsm-view-cursor-location
-                              ;; TODO: What to do for location abstraction?
-                              :initform (bsm-loc-make 0 0))))
+                              :initform nil)))
 
 (defun bsm-view-assert-name (view)
   "Check that a bsm-view instance has a defined name."
@@ -464,6 +509,17 @@ and return the new crate."
         (bsm-view-put-crate view location
                             (bsm-crate :bsm-crate-location location))))))
 
+(defun bsm-view-find-item (view item &optional eq-func)
+  "Return a hash of crates in this view keyed by their location
+which contains the item or nil if no crate contains the item. The
+structure is shared with the view so edits in the crates will
+show up in the view."
+  (bsm-hash-filter
+   (lambda (loc crate)
+     (bsm-crate-hash-item crate item))
+   (bsm-view-crates view)
+   t))
+
 ;; --------------------------------
 
 ;; This is not fully spec'ed out, just a placeholder for now.
@@ -471,10 +527,15 @@ and return the new crate."
   ((%bsm-space-selected-view :accessor bsm-space-selected-view
                              :initarg :bsm-space-selected-view
                              :type bsm-view)
+   ;; The buffer into which we render the buffer-space.
+   (%bsm-space-display-buffer :reader bsm-space-display-buffer
+                              :initarg :bsm-space-display-buffer
+                              :type buffer)
    (%bsm-space-views :reader bsm-space-views
                      :initarg :bsm-space-views
                      ;; KEY: bsm-view name, VALUE: bsm-view
-                     :initform (bsm-midt-make 'equal 'eq))))
+                     :initform (bsm-midt-make 'equal 'eq)
+                     :type bsm-midt)))
 
 (defun bsm-space-put-view (space view-or-name &optional select)
   "If view-or-name is a string, construct a new view by that name and insert it
@@ -512,10 +573,34 @@ the view."
 (defun bsm-space-make ()
   "Create and return an empty bsm-space instance with a single empty
 view named: default."
-  (let* ((new-space (bsm-space))
+  (let* ((new-space
+          (bsm-space
+           ;; TODO: For now, we get a buffer for the rendering and we always
+           ;; get the same one. Each individual space likely will have their
+           ;; own rendering buffer, but this is convenient now for debugging.
+           ;; This buffer will also show up in the view, which is probably ok
+           ;; for now. It probably should ONLY exist during the time we're
+           ;; actually seeing it, but since the user can always navigate away
+           ;; from it that might not be doable.
+           :bsm-space-display-buffer
+           (get-buffer-create "*bsm-space-display*")))
+
          (view-or-name "default")
          (view (bsm-space-put-view new-space view-or-name t)))
+
     new-space))
+
+;; This function needs a lot of work to behave right.
+(defun bsm-space-render (space)
+  (when space
+    (let ((time-format "%a %b %d %H:%M:%S %Z %Y\n")
+          (display-buffer (bsm-space-display-buffer space)))
+      (with-current-buffer display-buffer
+        (erase-buffer)
+        (insert (format-time-string time-format (current-time)))
+        (insert (format "The window body (width, height) is: (%s, %s)\n"
+                        (window-body-width) (window-body-height)))
+        ))))
 
 ;; --------------------------------
 
@@ -556,6 +641,7 @@ view named: default."
 ;; squishy methods.
 
 
+
 ;; We will use the first element for now, later we need to pick one
 (defun bsm-buffer-position (buffer &optional pos)
   "Given a buffer (name OR object) in vector position pos return [x y]"
@@ -567,18 +653,11 @@ view named: default."
                                      (gethash key current-workspace)))
                   (return key)))))
 
-(defun bsm-hash-keep (function hash-table)
-  "Filters a hash table keeping entries. keeping predicate should accept key and value."
-  (let ((temp (make-hash-table :test (hash-table-test hash-table))))
-    (cl-loop for key being the hash-keys of hash-table
-             for temp-value = (gethash key hash-table)
-             when (funcall function key temp-value) do
-             (puthash key temp-value temp))
-    temp))
 
 ;; TODO unify these into one that dispatches on x or y
 (defun bsm-get-aligned-x (x &optional pos)
-  "Gets a sorted list of all positions aligned with x. Pos is current workspace."
+  "Gets a sorted list of all positions aligned with x. Pos is
+current workspace."
   (setf pos (or pos 0))
   (let* ((buffers-map (elt *bsm-buffer-space-spaces* pos))
          (key-list (hash-table-keys buffers-map))
@@ -654,6 +733,9 @@ view named: default."
   (interactive)
   (bsm-move-vertically -1))
 
+(defun bsm-render ()
+  (interactive)
+  (bsm-space-render *bsm-buffer-space*))
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Overlay Prototyping Code
@@ -754,7 +836,7 @@ view named: default."
 (defun bsm-set-item (fb row col item)
   (setf (elt (bsm-store fb) (+ (* (bsm-cols fb) row) col)) item))
 
-(defun bsm-render (fb the-buffer )
+(defun bsm-render-it (fb the-buffer )
   (with-current-buffer the-buffer
     (erase-buffer)
     (cl-loop for row from 0 below (bsm-rows fb)
@@ -785,7 +867,7 @@ view named: default."
     ;; as the "store" for the data?
     (bsm-set-item fb 0 0 ?*)
     (bsm-set-item fb (1- (bsm-rows fb)) (1- (bsm-cols fb)) ?@)
-    (bsm-render fb ui)
+    (bsm-render-it fb ui)
 
     (switch-to-buffer ui nil t)
 
