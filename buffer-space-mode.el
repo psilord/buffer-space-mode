@@ -633,8 +633,10 @@ view named: default."
                           (insert "|"))
                          (t
                           ;; testing code for printint out a crate's entity.
-                          (setf (bsm-loc-x loc) col
-                                (bsm-loc-y loc) row)
+                          ;; TODO: The 1- is because we're in the inner border
+                          ;; of the ascii border. Make this math better.
+                          (setf (bsm-loc-x loc) (1- col)
+                                (bsm-loc-y loc) (1- row))
                           (if-let ((crate (bsm-view-get-crate sel-view loc)))
                               (insert
                                (propertize
@@ -666,6 +668,8 @@ view named: default."
          (selected-view (bsm-space-selected-view new-space))
          (buffers (buffer-list))
          (rect-edge-length (ceiling (sqrt (length buffers)))))
+    (princ (format "Inserting %s buffers in a square %s units high and wide."
+                   (length buffers) rect-edge-length))
     (cl-loop for i below (length buffers)
              for buf in buffers do
              ;; TODO: Technically, space should have a mapping function to
