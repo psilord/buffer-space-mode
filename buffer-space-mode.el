@@ -7,6 +7,7 @@
 ;; Modes are called with M-x buffer-space-mode
 ;; However, this might only apply to the localized select buffer
 
+;; TODO Maybe use <f5> to bring up buffer-space?
 (defconst buffer-space-mode-map
   ;; NOTE: You can update this, reload the file, and the changed keymap is in
   ;; effect--which is almost always what you want.
