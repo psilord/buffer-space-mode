@@ -630,7 +630,10 @@ view named: default."
                               (= col (1- body-width)))
                           (insert "|"))
                          (t
-                          (insert " "))))
+                          ;; testing code for printint out a crate's entity.
+                          (insert
+                           (propertize " "
+                                       'face '(:background "blue"))))))
                  ;; NOTE: Last column is dedicated to newlines in the store.
                  ;; Otherwise the fringe might show up. Fix it later.
                  (insert ?\n))
