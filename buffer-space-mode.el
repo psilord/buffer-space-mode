@@ -502,7 +502,7 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
   "Return the crate at the location or nil if none. If ensure is t
 then construct an empty crate at the location, insert it into the view,
 and return the new crate."
-  (let ((crate (gethash location (bsm-view-crates view)) nil))
+  (let ((crate (gethash location (bsm-view-crates view) nil)))
     (if crate
         crate
       (when ensure
@@ -605,7 +605,9 @@ view named: default."
            (display-window (selected-window))
            ;; Minus 1 because the last column is reserved for newlines.
            (body-width (1- (window-body-width)))
-           (body-height (window-body-height)))
+           (body-height (window-body-height))
+           (loc (bsm-loc-make 0 0))
+           (sel-view (bsm-space-selected-view space)))
       (with-current-buffer display-buffer
         ;;(bsm-debug-render display-buffer display-window)
 
@@ -631,9 +633,21 @@ view named: default."
                           (insert "|"))
                          (t
                           ;; testing code for printint out a crate's entity.
-                          (insert
-                           (propertize " "
-                                       'face '(:background "blue"))))))
+                          (setf (bsm-loc-x loc) col
+                                (bsm-loc-y loc) row)
+                          (if-let ((crate (bsm-view-get-crate sel-view loc)))
+                              (insert
+                               (propertize
+                                (string
+                                 (elt (buffer-name
+                                       (bsm-entity-item
+                                        (bsm-crate-entity crate)))
+                                      0))
+                                'face '((:background "blue")
+                                        (:foreground "white"))))
+                            (insert
+                             (propertize " "
+                                         'face '(:background "darkblue")))))))
                  ;; NOTE: Last column is dedicated to newlines in the store.
                  ;; Otherwise the fringe might show up. Fix it later.
                  (insert ?\n))
