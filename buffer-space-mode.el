@@ -11,10 +11,10 @@
   ;; NOTE: You can update this, reload the file, and the changed keymap is in
   ;; effect--which is almost always what you want.
   (let ((map (make-sparse-keymap)))
-    (define-key map [left] 'bsm-look-left)
-    (define-key map [right] 'bsm-look-right)
-    (define-key map [up] 'bsm-look-up)
-    (define-key map [down] 'bsm-look-down)
+    ;;(define-key map [left] 'bsm-look-left)
+    ;;(define-key map [right] 'bsm-look-right)
+    ;;(define-key map [up] 'bsm-look-up)
+    ;;(define-key map [down] 'bsm-look-down)
     (define-key map (kbd "<backtab>") 'bsm-render)
     map))
 
@@ -601,12 +601,39 @@ view named: default."
 ;; This function needs a lot of work to behave right.
 (defun bsm-space-render (space)
   (when space
-    (let ((display-buffer (bsm-space-display-buffer space))
-          (display-window (selected-window)))
+    (let* ((display-buffer (bsm-space-display-buffer space))
+           (display-window (selected-window))
+           (body-width (window-body-width))
+           (body-height (window-body-height)))
       (with-current-buffer display-buffer
-        (bsm-debug-render display-buffer display-window)
+        ;;(bsm-debug-render display-buffer display-window)
 
-
+        (erase-buffer)
+        (cl-loop for row from 0 below body-height
+                 do (cl-loop
+                     for col from 1 below body-width
+                     do (cond
+                         ((or (and (= row 0)
+                                   (= col 1))
+                              (and (= row (1- body-height))
+                                   (= col (1- body-width)))
+                              (and (= row (1- body-height))
+                                   (= col 1))
+                              (and (= row 0)
+                                   (= col (1- body-width))))
+                          (insert "+"))
+                         ((or (= row 0)
+                              (= row (1- body-height)))
+                          (insert "-"))
+                         ((or (= col 1)
+                              (= col (1- body-width)))
+                          (insert "|"))
+                         (t
+                          (insert " "))))
+                 ;; NOTE: Last column is dedicated to newlines in the store.
+                 ;; Otherwise the fringe might show up. Fix it later.
+                 (insert ?\n))
+        (goto-char 0)
         ))))
 
 ;; --------------------------------
