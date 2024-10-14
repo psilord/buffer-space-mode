@@ -649,7 +649,7 @@ view named: default."
                                         (:foreground "white"))))
                             (insert
                              (propertize " "
-                                         'face '(:background "darkblue")))))))
+                                         'face '(:background "navy")))))))
                  ;; NOTE: Last column is dedicated to newlines in the store.
                  ;; Otherwise the fringe might show up. Fix it later.
                  (insert ?\n))
