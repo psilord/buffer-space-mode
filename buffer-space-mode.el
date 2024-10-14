@@ -509,6 +509,23 @@ and return the new crate."
         (bsm-view-put-crate view location
                             (bsm-crate :bsm-crate-location location))))))
 
+(defun bsm-view-recalculate-bbox (view)
+  "Recalculate the smallest bounding box for the crates."
+  ;; TODO: Implement me.
+  )
+
+(defun bsm-view-rem-crate (view crate)
+  "If the location in the crate, when looked up in the crates for
+this view, matches with eq the passed in crate then remove the
+crate from the view and recalculate the bounding box. Return t if
+the crate was found and removed."
+  (let* ((loc (bsm-crate-location crate))
+         (fcrate (bsm-view-get-crate view loc)))
+    (when (and fcrate (eq fcrate crate))
+      (remhash loc (bsm-view-crates view))
+      (bsm-view-recalculate-bbox view)
+      t)))
+
 (defun bsm-view-find-item (view item &optional eq-func)
   "Return a hash of crates in this view keyed by their location
 which contains the item or nil if no crate contains the item. The
