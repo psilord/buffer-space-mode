@@ -649,24 +649,31 @@ view named: default."
                               (= col (1- body-width)))
                           (insert "|"))
                          (t
-                          ;; testing code for printint out a crate's entity.
+                          ;; testing code for printing out a crate's entity.
                           ;; TODO: The 1- is because we're in the inner border
                           ;; of the ascii border. Make this math better.
                           (setf (bsm-loc-x loc) (1- col)
                                 (bsm-loc-y loc) (1- row))
-                          (if-let ((crate (bsm-view-get-crate sel-view loc)))
-                              (insert
-                               (propertize
-                                (string
-                                 (elt (buffer-name
-                                       (bsm-entity-item
-                                        (bsm-crate-entity crate)))
-                                      0))
-                                'face '((:background "blue")
-                                        (:foreground "white"))))
-                            (insert
-                             (propertize " "
-                                         'face '(:background "navy")))))))
+                          (if-let* ((crate (bsm-view-get-crate sel-view loc))
+                                    (entity (bsm-crate-entity crate))
+                                    (name
+                                     (buffer-name (bsm-entity-item entity)))
+                                    (char (elt name 0)))
+                              ;; Denote * delimited buffers differently as a
+                              ;; test.
+                              (let ((nchar
+                                     (when (char-equal char ?*)
+                                       (elt name 1))))
+                                (insert
+                                 (propertize
+                                  (string (or nchar char))
+                                  'face (if nchar
+                                            '((:background "blue")
+                                              (:foreground "white"))
+                                          '((:background "midnightblue")
+                                            (:foreground "white"))))))
+                            ;; else case
+                            (insert " ")))))
                  ;; NOTE: Last column is dedicated to newlines in the store.
                  ;; Otherwise the fringe might show up. Fix it later.
                  (insert ?\n))
