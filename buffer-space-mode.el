@@ -16,7 +16,7 @@
     ;;(define-key map [right] 'bsm-look-right)
     ;;(define-key map [up] 'bsm-look-up)
     ;;(define-key map [down] 'bsm-look-down)
-    (define-key map (kbd "<backtab>") 'bsm-render)
+    (define-key map (kbd "<f5>") 'bsm-render)
     map))
 
 (define-minor-mode buffer-space-mode
