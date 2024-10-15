@@ -671,7 +671,7 @@ view named: default."
                                   'face (if nchar
                                             '((:background "blue")
                                               (:foreground "white"))
-                                          '((:background "midnightblue")
+                                          '((:background "darkorange4")
                                             (:foreground "white"))))))
                             ;; else case
                             (insert " ")))))
