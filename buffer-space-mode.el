@@ -501,7 +501,7 @@ the span of [start, end) to do it."
 ;; --------------------------------
 
 ;; This class represents a _preclipped_ rectangle subregion (or a tile) in an
-;; emacs bsm display buffer object. The btile is ALWAYS referenced to an
+;; emacs *bsm-display-buffer* buffer. The btile is ALWAYS referenced to an
 ;; absolute character position in the actual display buffer.  The buffer object
 ;; is a linear array of characters where newlines represent rows of text in a
 ;; buffer. A constraint about how we use that buffer for display is that the
@@ -516,7 +516,7 @@ the span of [start, end) to do it."
   (;; The buffer in which this btile is in an absolute position.
    (%bsm-btile-buffer :accessor bsm-btile-buffer
                       :initarg :bsm-btile-buffer)
-   ;; The character position of the upper left corner of this tile.
+   ;; The buffer character position of the upper left corner of this tile.
    (%bsm-btile-pos :accessor bsm-btile-pos
                    :initarg :bsm-btile-pos)
    ;; How many characters to move forward to be at the start of the next row in
@@ -544,6 +544,10 @@ the span of [start, end) to do it."
        (>= col 0)
        (< col (bsm-btile-cols btile))))
 
+(defun bsm-btile-get-charpos (btile row col)
+  "Return the character position of the row,col coordinate in this btile."
+  (+ (bsm-btile-pos btile) (* row (bsm-btile-stride btile)) col))
+
 (defun bsm-btile-replace-row (btile string row col)
   "Render the string into the buffer starting at the relative
 position of row,col in the btile, up to length of string
@@ -553,12 +557,9 @@ off the btile, do nothing (even if the string would have
 otherwise had a part of it show). Return t if anything was
 rendered into the buffer nil otherwise."
   (when (bsm-btile-valid-coordinate-p btile row col)
-    (let* ((start (+ (bsm-btile-pos btile)
-                     (* row (bsm-btile-stride btile))
-                     col))
-           (end (+ start col
-                   (min (- (bsm-btile-cols btile) col)
-                        (length string)))))
+    (let* ((start (bsm-btile-get-charpos btile row col))
+           (end (+ start col (min (- (bsm-btile-cols btile) col)
+                                  (length string)))))
       (bsm-util-replace-string (bsm-btile-buffer btile) string start end)
       t)))
 
@@ -568,17 +569,15 @@ position of row,col in the btile, up to length of string
 characters in the column. If the string is too big to fit into
 the btile, clip it to fit into the tile. If the initial row,col
 is off the btile, do nothing (even if the string would have
-otherwize had a part of it show).  Return t if anything was
+otherwize had a part of it show). Return t if anything was
 rendered into the buffer nil otherwise."
   (when (bsm-btile-valid-coordinate-p btile row col)
-    (let* ((start (+ (bsm-btile-pos btile)
-                     (* row (bsm-btile-stride btile))
-                     col))
+    (let* ((start (bsm-btile-get-charpos btile row col))
            (num-rows (min (- (bsm-btile-rows btile) row)
                           (length string))))
       (dotimes (r num-rows)
         (let ((c (subseq string r (1+ r)))
-              (current-row-pos (+ start (* r (bsm-btile-stride btile)))))
+              (current-row-pos (bsm-btile-get-charpos btile (+ row r) col)))
           (bsm-util-replace-string
            (bsm-btile-buffer btile) c current-row-pos (1+ current-row-pos))))
       t)))
