@@ -184,10 +184,47 @@ trace and put it into the error message."
 ;;; Utilities
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun bsm-format-ind (indent fmt &rest objects)
+(defun bsm-util-format-ind (indent fmt &rest objects)
+  "Compute and return the rendered format string with the supplied
+fmt and objects, but put indent spaces infront of ot."
   (apply 'format (concat (make-string indent ? ) fmt) objects))
 
-(defun bsm-euclidean-distance (p0 p1)
+;; TODO: maybe alter this to preserve properties and provide &option for
+;; choosing this behavior.
+(defun bsm-util-replace-char (buffer pos char-as-string)
+  "Replace a character in the buffer, not preserving original properties."
+  (with-current-buffer buffer
+    (save-excursion
+      (goto-char pos)
+      (delete-char 1)
+      (insert char-as-string))))
+
+(defun bsm-util-replace-string (buffer new-string start end)
+  "Replace the string in the buffer range [start, end) by the
+new-string. If the new-string is too big, truncate it. If it is
+too small, fill the rest with unpropertized space characters to
+maintain the same number of characters. Properties are not preserved."
+  ;; TODO: If new-string is too small, another option is to leave the other
+  ;; characters as you found them. This might be a viable alternative.
+  (let* ((num-range-chars (- end start))
+         (num-range-chars (if (< num-range-chars 0) 0 num-range-chars))
+         (len-new-string (length new-string))
+         (clipped-string (subseq new-string 0 (min len-new-string
+                                                   num-range-chars)))
+         (len-clipped-string (length clipped-string))
+         (full-size-string
+          (if (< len-clipped-string num-range-chars)
+              (concat clipped-string
+                      (make-string (- num-range-chars len-clipped-string)
+                                   ? ))
+            clipped-string)))
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char start)
+        (delete-char num-range-chars)
+        (insert full-size-string)))))
+
+(defun bsm-util-euclidean-distance (p0 p1)
   "Return the Euclidean distance between two points p0 and p1. The
 points must be vectors and of the same length."
   (if (/= (length p0) (length p1))
@@ -195,7 +232,7 @@ points must be vectors and of the same length."
   (sqrt (reduce '+ (map 'vector (lambda (x) (expt x 2))
                         (map 'vector '- p1 p0)))))
 
-(defun bsm-hash-filter (filter hash-table &optional nil-on-empty)
+(defun bsm-util-hash-filter (filter hash-table &optional nil-on-empty)
   "Filters a hash table keeping entries. keeping predicate should
 accept key and value. Returns the hash table even if it has a
 count of zero UNLESS nil-on-empty is true, in which case nil is
@@ -410,6 +447,13 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
                (bsm-entity-item entity)
                item))))
 
+;; TODO: Fix this to render into an absolute rectangular position in a buffer
+;; as opposed to just a line.
+(defun bsm-render-crate (crate display-buffer start end)
+  "Render the crate into the display-buffer, but only using exactly
+the span of [start, end) to do it."
+  nil)
+
 ;; --------------------------------
 
 ;; A trivial bounding box implementation for 2d.
@@ -426,6 +470,14 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
    (%bsm-bbox-max-y :accessor bsm-bbox-max-y
                     :initarg :bsm-bbox-max-y
                     :initform nil)))
+
+(defun bsm-bbox-clear (bbox)
+  "Reset the bbox to have nil for all slots. Return the bbox."
+  (setf (bsm-bbox-min-x bbox) nil
+        (bsm-bbox-max-x bbox) nil
+        (bsm-bbox-min-y bbox) nil
+        (bsm-bbox-max-y boox) nil)
+  bbox)
 
 (defun bsm-bbox-expand (bbox loc)
   "Recompute how big the bbox would be if loc is added to it."
@@ -445,6 +497,91 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
   (if (or (null (bsm-bbox-max-y bbox))
           (> (bsm-loc-y loc) (bsm-bbox-max-y bbox)))
       (setf (bsm-bbox-max-y bbox) (bsm-loc-y loc))))
+
+;; --------------------------------
+
+;; This class represents a _preclipped_ rectangle subregion (or a tile) in an
+;; emacs bsm display buffer object. The btile is ALWAYS referenced to an
+;; absolute character position in the actual display buffer.  The buffer object
+;; is a linear array of characters where newlines represent rows of text in a
+;; buffer. A constraint about how we use that buffer for display is that the
+;; buffer must be filled with the exact number of characters (with newlines at
+;; end of line) as fits into an emacs window for the postiion and stride to
+;; work out in a tile. The newlines are present to prevent the fringe from
+;; being printed out.
+;;
+;; NOTE: Fringes cannot be turned off in tty mode, so the newline
+;; representation must stay to keep a clean fringe area in tty mode.
+(defclass bsm-btile ()
+  (;; The buffer in which this btile is in an absolute position.
+   (%bsm-btile-buffer :accessor bsm-btile-buffer
+                      :initarg :bsm-btile-buffer)
+   ;; The character position of the upper left corner of this tile.
+   (%bsm-btile-pos :accessor bsm-btile-pos
+                   :initarg :bsm-btile-pos)
+   ;; How many characters to move forward to be at the start of the next row in
+   ;; this tile.
+   (%bsm-btile-stride :accessor bsm-btile-stride
+                      :initarg :bsm-btile-stride)
+   ;; How many rows exist in this tile. 0 indexed.
+   (%bsm-btile-rows :accessor bsm-btile-rows
+                    :initarg :bsm-btile-rows)
+   ;; How many columns each row consists of in this tile. 0 indexed.
+   (%bsm-btile-cols :accessor bsm-btile-cols
+                    :initarg :bsm-btile-cols)))
+
+(defun bsm-btile-make (buffer pos stride rows cols)
+  (bsm-btile :bsm-btile-buffer buffer
+             :bsm-btile-pos pos
+             :bsm-btile-stride stride
+             :bsm-btile-rows rows
+             :bsm-btile-cols cols))
+
+(defun bsm-btile-valid-coordinate-p (btile row col)
+  "Return true if row,col specifies a location inside the btile."
+  (and (>= row 0)
+       (< row (bsm-btile-rows btile))
+       (>= col 0)
+       (< col (bsm-btile-cols btile))))
+
+(defun bsm-btile-replace-row (btile string row col)
+  "Render the string into the buffer starting at the relative
+position of row,col in the btile, up to length of string
+characters in the row. If the string is too big to fit into the
+btile, clip it to fit into the tile. If the initial row,col is
+off the btile, do nothing (even if the string would have
+otherwise had a part of it show). Return t if anything was
+rendered into the buffer nil otherwise."
+  (when (bsm-btile-valid-coordinate-p btile row col)
+    (let* ((start (+ (bsm-btile-pos btile)
+                     (* row (bsm-btile-stride btile))
+                     col))
+           (end (+ start col
+                   (min (- (bsm-btile-cols btile) col)
+                        (length string)))))
+      (bsm-util-replace-string (bsm-btile-buffer btile) string start end)
+      t)))
+
+(defun bsm-btile-replace-column (btile string row col)
+  "Render the string into the buffer starting at the relative
+position of row,col in the btile, up to length of string
+characters in the column. If the string is too big to fit into
+the btile, clip it to fit into the tile. If the initial row,col
+is off the btile, do nothing (even if the string would have
+otherwize had a part of it show).  Return t if anything was
+rendered into the buffer nil otherwise."
+  (when (bsm-btile-valid-coordinate-p btile row col)
+    (let* ((start (+ (bsm-btile-pos btile)
+                     (* row (bsm-btile-stride btile))
+                     col))
+           (num-rows (min (- (bsm-btile-rows btile) row)
+                          (length string))))
+      (dotimes (r num-rows)
+        (let ((c (subseq string r (1+ r)))
+              (current-row-pos (+ start (* r (bsm-btile-stride btile)))))
+          (bsm-util-replace-string
+           (bsm-btile-buffer btile) c current-row-pos (1+ current-row-pos))))
+      t)))
 
 ;; --------------------------------
 
@@ -511,9 +648,12 @@ and return the new crate."
                             (bsm-crate :bsm-crate-location location))))))
 
 (defun bsm-view-recalculate-bbox (view)
-  "Recalculate the smallest bounding box for the crates."
-  ;; TODO: Implement me.
-  )
+  "Recalculate the smallest bounding box for the crates. Return the view."
+  (let ((bbox (bsm-bbox-clear (bsm-view-bbox view))))
+    (maphash (lambda (loc crate)
+               (bsm-bbox-expand bbox (bsm-crate-location)))
+             (bsm-crates view))
+    view))
 
 (defun bsm-view-rem-crate (view crate)
   "If the location in the crate, when looked up in the crates for
@@ -532,11 +672,24 @@ the crate was found and removed."
 which contains the item or nil if no crate contains the item. The
 structure is shared with the view so edits in the crates will
 show up in the view."
-  (bsm-hash-filter
+  (bsm-util-hash-filter
    (lambda (loc crate)
      (bsm-crate-hash-item crate item))
    (bsm-view-crates view)
    t))
+
+
+(defun bsm-render-location (view location display-buffer start end)
+  "Reander the location into the display buffer, but only within the
+range of [start, end)."
+  nil)
+
+;; TODO, this one is a little sketchy because I don't know how the delta stuff
+;; quite looks yet. Should px py (of the upper left corner) be slots in the
+;; view? Maybe.
+(defun bsm-render-view (view display-buffer px py max-x max-y)
+  "Render all the crates in the view into the display buffer at offset px py"
+  nil)
 
 ;; --------------------------------
 
