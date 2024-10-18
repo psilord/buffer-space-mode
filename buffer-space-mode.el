@@ -248,6 +248,8 @@ return in that context."
       results)))
 
 
+;; --------------------------------
+
 ;; The MIDT is a special hash table implementation.
 
 (defclass bsm-midt ()
@@ -308,6 +310,90 @@ If it is not present return the default."
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Types
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; --------------------------------
+
+;; This class represents a _preclipped_ rectangle subregion (or a tile) in an
+;; emacs *bsm-display-buffer* buffer. The btile is ALWAYS referenced to an
+;; absolute character position in the actual display buffer.  The buffer object
+;; is a linear array of characters where newlines represent rows of text in a
+;; buffer. A constraint about how we use that buffer for display is that the
+;; buffer must be filled with the exact number of characters (with newlines at
+;; end of line) as fits into an emacs window for the postiion and stride to
+;; work out in a tile. The newlines are present to prevent the fringe from
+;; being printed out.
+;;
+;; NOTE: Fringes cannot be turned off in tty mode, so the newline
+;; representation must stay to keep a clean fringe area in tty mode.
+(defclass bsm-btile ()
+  (;; The buffer in which this btile is in an absolute position.
+   (%bsm-btile-buffer :accessor bsm-btile-buffer
+                      :initarg :bsm-btile-buffer)
+   ;; The buffer character position of the upper left corner of this tile.
+   (%bsm-btile-pos :accessor bsm-btile-pos
+                   :initarg :bsm-btile-pos)
+   ;; How many characters to move forward to be at the start of the next row in
+   ;; this tile.
+   (%bsm-btile-stride :accessor bsm-btile-stride
+                      :initarg :bsm-btile-stride)
+   ;; How many rows exist in this tile. 0 indexed.
+   (%bsm-btile-rows :accessor bsm-btile-rows
+                    :initarg :bsm-btile-rows)
+   ;; How many columns each row consists of in this tile. 0 indexed.
+   (%bsm-btile-cols :accessor bsm-btile-cols
+                    :initarg :bsm-btile-cols)))
+
+(defun bsm-btile-make (buffer pos stride rows cols)
+  (bsm-btile :bsm-btile-buffer buffer
+             :bsm-btile-pos pos
+             :bsm-btile-stride stride
+             :bsm-btile-rows rows
+             :bsm-btile-cols cols))
+
+(defun bsm-btile-valid-coordinate-p (btile row col)
+  "Return true if row,col specifies a location inside the btile."
+  (and (>= row 0)
+       (< row (bsm-btile-rows btile))
+       (>= col 0)
+       (< col (bsm-btile-cols btile))))
+
+(defun bsm-btile-get-charpos (btile row col)
+  "Return the character position of the row,col coordinate in this btile."
+  (+ (bsm-btile-pos btile) (* row (bsm-btile-stride btile)) col))
+
+(defun bsm-btile-replace-row (btile string row col)
+  "Render the string into the buffer starting at the relative
+position of row,col in the btile, up to length of string
+characters in the row. If the string is too big to fit into the
+btile, clip it to fit into the tile. If the initial row,col is
+off the btile, do nothing (even if the string would have
+otherwise had a part of it show). Return t if anything was
+rendered into the buffer nil otherwise."
+  (when (bsm-btile-valid-coordinate-p btile row col)
+    (let* ((start (bsm-btile-get-charpos btile row col))
+           (end (+ start col (min (- (bsm-btile-cols btile) col)
+                                  (length string)))))
+      (bsm-util-replace-string (bsm-btile-buffer btile) string start end)
+      t)))
+
+(defun bsm-btile-replace-column (btile string row col)
+  "Render the string into the buffer starting at the relative
+position of row,col in the btile, up to length of string
+characters in the column. If the string is too big to fit into
+the btile, clip it to fit into the tile. If the initial row,col
+is off the btile, do nothing (even if the string would have
+otherwize had a part of it show). Return t if anything was
+rendered into the buffer nil otherwise."
+  (when (bsm-btile-valid-coordinate-p btile row col)
+    (let* ((start (bsm-btile-get-charpos btile row col))
+           (num-rows (min (- (bsm-btile-rows btile) row)
+                          (length string))))
+      (dotimes (r num-rows)
+        (let ((c (subseq string r (1+ r)))
+              (current-row-pos (bsm-btile-get-charpos btile (+ row r) col)))
+          (bsm-util-replace-string
+           (bsm-btile-buffer btile) c current-row-pos (1+ current-row-pos))))
+      t)))
 
 ;; --------------------------------
 
@@ -500,90 +586,6 @@ the span of [start, end) to do it."
 
 ;; --------------------------------
 
-;; This class represents a _preclipped_ rectangle subregion (or a tile) in an
-;; emacs *bsm-display-buffer* buffer. The btile is ALWAYS referenced to an
-;; absolute character position in the actual display buffer.  The buffer object
-;; is a linear array of characters where newlines represent rows of text in a
-;; buffer. A constraint about how we use that buffer for display is that the
-;; buffer must be filled with the exact number of characters (with newlines at
-;; end of line) as fits into an emacs window for the postiion and stride to
-;; work out in a tile. The newlines are present to prevent the fringe from
-;; being printed out.
-;;
-;; NOTE: Fringes cannot be turned off in tty mode, so the newline
-;; representation must stay to keep a clean fringe area in tty mode.
-(defclass bsm-btile ()
-  (;; The buffer in which this btile is in an absolute position.
-   (%bsm-btile-buffer :accessor bsm-btile-buffer
-                      :initarg :bsm-btile-buffer)
-   ;; The buffer character position of the upper left corner of this tile.
-   (%bsm-btile-pos :accessor bsm-btile-pos
-                   :initarg :bsm-btile-pos)
-   ;; How many characters to move forward to be at the start of the next row in
-   ;; this tile.
-   (%bsm-btile-stride :accessor bsm-btile-stride
-                      :initarg :bsm-btile-stride)
-   ;; How many rows exist in this tile. 0 indexed.
-   (%bsm-btile-rows :accessor bsm-btile-rows
-                    :initarg :bsm-btile-rows)
-   ;; How many columns each row consists of in this tile. 0 indexed.
-   (%bsm-btile-cols :accessor bsm-btile-cols
-                    :initarg :bsm-btile-cols)))
-
-(defun bsm-btile-make (buffer pos stride rows cols)
-  (bsm-btile :bsm-btile-buffer buffer
-             :bsm-btile-pos pos
-             :bsm-btile-stride stride
-             :bsm-btile-rows rows
-             :bsm-btile-cols cols))
-
-(defun bsm-btile-valid-coordinate-p (btile row col)
-  "Return true if row,col specifies a location inside the btile."
-  (and (>= row 0)
-       (< row (bsm-btile-rows btile))
-       (>= col 0)
-       (< col (bsm-btile-cols btile))))
-
-(defun bsm-btile-get-charpos (btile row col)
-  "Return the character position of the row,col coordinate in this btile."
-  (+ (bsm-btile-pos btile) (* row (bsm-btile-stride btile)) col))
-
-(defun bsm-btile-replace-row (btile string row col)
-  "Render the string into the buffer starting at the relative
-position of row,col in the btile, up to length of string
-characters in the row. If the string is too big to fit into the
-btile, clip it to fit into the tile. If the initial row,col is
-off the btile, do nothing (even if the string would have
-otherwise had a part of it show). Return t if anything was
-rendered into the buffer nil otherwise."
-  (when (bsm-btile-valid-coordinate-p btile row col)
-    (let* ((start (bsm-btile-get-charpos btile row col))
-           (end (+ start col (min (- (bsm-btile-cols btile) col)
-                                  (length string)))))
-      (bsm-util-replace-string (bsm-btile-buffer btile) string start end)
-      t)))
-
-(defun bsm-btile-replace-column (btile string row col)
-  "Render the string into the buffer starting at the relative
-position of row,col in the btile, up to length of string
-characters in the column. If the string is too big to fit into
-the btile, clip it to fit into the tile. If the initial row,col
-is off the btile, do nothing (even if the string would have
-otherwize had a part of it show). Return t if anything was
-rendered into the buffer nil otherwise."
-  (when (bsm-btile-valid-coordinate-p btile row col)
-    (let* ((start (bsm-btile-get-charpos btile row col))
-           (num-rows (min (- (bsm-btile-rows btile) row)
-                          (length string))))
-      (dotimes (r num-rows)
-        (let ((c (subseq string r (1+ r)))
-              (current-row-pos (bsm-btile-get-charpos btile (+ row r) col)))
-          (bsm-util-replace-string
-           (bsm-btile-buffer btile) c current-row-pos (1+ current-row-pos))))
-      t)))
-
-;; --------------------------------
-
 ;; A view holds a sparse (usually) 2d sheet of crates and function (eventually)
 ;; to place those crates into locations in the view. Each crate holds a single
 ;; entity.  The view is responsible for tracking the crates, their locations,
@@ -678,16 +680,13 @@ show up in the view."
    t))
 
 
-(defun bsm-render-location (view location display-buffer start end)
-  "Reander the location into the display buffer, but only within the
+(defun bsm-view-render-location (view location display-buffer start end)
+  "Render the location into the display buffer, but only within the
 range of [start, end)."
   nil)
 
-;; TODO, this one is a little sketchy because I don't know how the delta stuff
-;; quite looks yet. Should px py (of the upper left corner) be slots in the
-;; view? Maybe.
-(defun bsm-render-view (view display-buffer px py max-x max-y)
-  "Render all the crates in the view into the display buffer at offset px py"
+(defun bsm-view-render (view btile)
+  "Render the view's meta data and the crates into the supplied btile."
   nil)
 
 ;; --------------------------------
