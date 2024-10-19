@@ -419,7 +419,7 @@ rendered into the buffer nil otherwise."
    (%bsm-entity-item :accessor bsm-entity-item
                      :initarg :bsm-entity-item)))
 
-(defun bsm-entity-has-item (entity item &optional eq-func)
+(defun bsm-entity-is-item (entity item &optional eq-func)
   "Return true if the item held by the entity is equivalent to the
 supplied item via the eq-func--otherwise return nil."
   (when entity
@@ -495,7 +495,8 @@ if they represent the exact same coordinate."
                      :initarg :bsm-crate-pin-p
                      :initform nil)
    ;; If not specified, leave the back/fore ground color to whatever is in the
-   ;; buffer being rendered into.
+   ;; buffer being rendered into. The colors here are strings or nil if there
+   ;; is no color.
    (%bsm-crate-background-color :accessor bsm-crate-background-color
                                 :initarg :bsm-crate-background-color
                                 :initform nil)
@@ -524,7 +525,7 @@ entity."
         (bsm-crate-entity crate) nil)
   crate)
 
-(defun bsm-crate-has-item (crate item &optional eq-func)
+(defun bsm-crate-is-item (crate item &optional eq-func)
   "Return true if the item held by the entity in the crate is
 equivalent to the supplied item via the eq-func--otherwise return nil."
   (when crate
@@ -533,12 +534,49 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
                (bsm-entity-item entity)
                item))))
 
-;; TODO: Fix this to render into an absolute rectangular position in a buffer
-;; as opposed to just a line.
-(defun bsm-render-crate (crate display-buffer start end)
-  "Render the crate into the display-buffer, but only using exactly
-the span of [start, end) to do it."
-  nil)
+(defun bsm-crate-render (crate btile)
+  "Render the crate using whatever space is provided it in the btile."
+  ;; TODO: Currently we render into exactly one row only. We don't utilize
+  ;; the 2d tile space at all if asked to do so. This needs improvement.
+  (when-let ((entity (bsm-crate-entity crate)))
+    (let* ((id (bsm-entity-id entity))
+           (name (if (bsm-id-use-name-p id)
+                     (bsm-id-name id)
+                   (buffer-name (bsm-entity-item entity))))
+           (width (bsm-btile-cols btile))
+           ;; Here, get enough of the name of the
+           (cpos (seq-position
+                  name (seq-find (lambda (c)
+                                   (and (not (char-equal c ? ))
+                                        (if (= width 1)
+                                            (not (char-equal c ?*))
+                                          t)))
+                                 name)))
+           (short-name (subseq name cpos (min (length name) (+ cpos width))))
+           (back-color (bsm-crate-background-color crate))
+           (fore-color (bsm-crate-foreground-color crate))
+           (pinned-p (bsm-crate-pin-p crate))
+           (properties `(,@(when back-color
+                             `((:background ,back-color)))
+                         ,@(when fore-color
+                             `((:foreground ,fore-color)))
+                         ,@(when pinned-p
+                             `((:underline t)))))
+           (prop-short-name
+            (propertize short-name 'face properties)))
+      (bsm-btile-replace-row btile prop-short-name 0 0))))
+
+(defun bsm-crate-test-render ()
+  (with-current-buffer "*bsm-space-display*"
+    (save-excursion
+      (let* ((btile (bsm-btile-make (current-buffer) (point) 80 1 20))
+             (entity (bsm-ent/buf-make (current-buffer)))
+             (crate (bsm-crate-make (bsm-loc-make 0 0) entity)))
+
+        (setf (bsm-crate-foreground-color crate) "white"
+              (bsm-crate-background-color crate) "blue"
+              (bsm-crate-pin-p crate) t)
+        (bsm-crate-render crate btile)))))
 
 ;; --------------------------------
 
@@ -680,11 +718,24 @@ show up in the view."
    t))
 
 
-(defun bsm-view-render-location (view location display-buffer start end)
+(defun bsm-view-render-location (view btile)
   "Render the location into the display buffer, but only within the
 range of [start, end)."
   nil)
 
+;; The space has given the view a btile into which it must render the whole
+;; of itself. The View will split this up into smaller btiles into which
+;; it will render the crates.
+;;
+;; | view name
+;; @-----------------+
+;; |                 |
+;; |                 |
+;; |                 |
+;; |                 |
+;; |                 |
+;; +-----------------+
+;;
 (defun bsm-view-render (view btile)
   "Render the view's meta data and the crates into the supplied btile."
   nil)
