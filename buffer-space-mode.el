@@ -670,10 +670,14 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
   (bsm-id-name (bsm-view-id view)))
 
 (defun bsm-view-put-crate (view crate)
-  "Insert the crate into the view at the location specified in crate."
+  "Insert the crate into the view at the location specified in crate and
+expand the bounding box.
+Return the crate."
   (puthash (bsm-crate-location crate)
            crate
-           (bsm-view-crates view)))
+           (bsm-view-crates view))
+  (bsm-bbox-expand (bsm-view-bbox view) (bsm-crate-location crate))
+  crate)
 
 (defun bsm-view-get-crate (view location &optional ensure)
   "Return the crate at the location or nil if none. If ensure is t
@@ -728,7 +732,7 @@ range of [start, end)."
 ;; it will render the crates.
 ;;
 ;; | view name
-;; @-----------------+
+;; +-----------------+
 ;; |                 |
 ;; |                 |
 ;; |                 |
@@ -736,8 +740,10 @@ range of [start, end)."
 ;; |                 |
 ;; +-----------------+
 ;;
+;; TODO: For now, we assume a crate is at least 4 character rows high and 4
+;; character columns wide.
 (defun bsm-view-render (view btile)
-  "Render the view's meta data and the crates into the supplied btile."
+  "Render the view's meta data and visible crates into the supplied btile."
   nil)
 
 ;; --------------------------------
