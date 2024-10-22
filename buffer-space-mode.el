@@ -350,6 +350,31 @@ If it is not present return the default."
              :bsm-btile-rows rows
              :bsm-btile-cols cols))
 
+(defun bsm-btile-make-subtile (btile subrow-start subcol-start num-rows
+                                     num-cols &optional target-btile)
+
+  "Construct a new (or fill in target-btile if supplied) tile that is a
+fully contained subregion of the btile. The subrectangle starts at
+[subrow-start, subcol-start] and is num-rows and num-cols in extent.
+Return the reference to the new, or passed in target-btile, btile."
+
+  (unless (and (>= subrow-start 0)
+               (>= subcol-start 0)
+               (<= (+ subrow-start num-rows) (bsm-btile-rows btile))
+               (<= (+ subcol-start num-cols) (bsm-btile-cols btile)))
+    (bsm-error "Subtile must fit into the original btile: btile is %s, subrow-start: %s, subcol-start: %s, num-rows: %s, num-cols: %s\n"
+               btile subrow-start subcol-start num-rows num-cols))
+
+  (let ((sub-btile (or target-btile (bsm-btile))))
+    (setf (bsm-btile-buffer sub-btile) (bsm-btile-buffer btile)
+          (bsm-btile-pos sub-btile) (bsm-btile-get-charpos btile
+                                                           subrow-start
+                                                           subcol-start)
+          (bsm-btile-stride sub-btile) (bsm-btile-stride btile)
+          (bsm-btile-rows sub-btile) num-rows
+          (bsm-btile-cols sub-btile) num-cols)
+    sub-btile))
+
 (defun bsm-btile-valid-coordinate-p (btile row col)
   "Return true if row,col specifies a location inside the btile."
   (and (>= row 0)
@@ -567,6 +592,7 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
       (bsm-btile-replace-row btile prop-short-name 0 0))))
 
 (defun bsm-crate-test-render ()
+  "A test function."
   (with-current-buffer "*bsm-space-display*"
     (save-excursion
       (let* ((btile (bsm-btile-make (current-buffer) (point) 80 1 20))
@@ -621,6 +647,24 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
   (if (or (null (bsm-bbox-max-y bbox))
           (> (bsm-loc-y loc) (bsm-bbox-max-y bbox)))
       (setf (bsm-bbox-max-y bbox) (bsm-loc-y loc))))
+
+;; TODO: If there is a single point in the view, then, technically, the
+;; bounding box has 0 size.
+(defun bsm-bbox-width (bbox)
+  (let ((min-x (bsm-bbox-min-x bbox))
+        (max-x (bsm-bbox-max-x bbox)))
+    (if (and min-x max-x)
+        (abs (1+ (- max-x min-x)))
+      0)))
+
+;; TODO: If there is a single point in the view, then, technically, the
+;; bounding box has 0 size.
+(defun bsm-bbox-height (bbox)
+  (let ((min-y (bsm-bbox-min-y bbox))
+        (max-y (bsm-bbox-max-y bbox)))
+    (if (and min-y max-y)
+        (abs (1+ (- max-y min-y)))
+      0)))
 
 ;; --------------------------------
 
@@ -740,11 +784,95 @@ range of [start, end)."
 ;; |                 |
 ;; +-----------------+
 ;;
-;; TODO: For now, we assume a crate is at least 4 character rows high and 4
-;; character columns wide.
+;; TODO: For now, we assume a btile for a view is at least 4 character rows
+;; high and 4 character columns wide.
 (defun bsm-view-render (view btile)
   "Render the view's meta data and visible crates into the supplied btile."
-  nil)
+  (unless (and (>= (bsm-btile-rows btile) 4)
+               (>= (bsm-btile-cols btile) 4))
+    (bsm-error "view to small to render: %s\n" view))
+
+  ;; First, draw the name row
+  (let* ((view-name (bsm-view-name view))
+         (prop-view-name view-name)
+         (view-title (concat "| " prop-view-name)))
+    (bsm-btile-replace-row btile view-title 0 0))
+
+  ;; Next, draw the box boundaries.
+  (let* ((top/bot-num-border (- (bsm-btile-cols btile) 2))
+         (left/right-num-border (- (bsm-btile-cols btile) 3))
+         (top-row (concat "+" (make-string top/bot-num-border ?-) "+"))
+         (bot-row (concat "+" (make-string top/bot-num-border ?-) "+"))
+         (left-col (make-string left/right-num-border ?|))
+         (right-col (make-string left/right-num-border ?|)))
+
+    ;; TODO: fixup to draw extension boundaries based on bbox with cursor
+    ;; in the middle of the btile.
+    (bsm-btile-replace-row btile top-row 1 0)
+    (bsm-btile-replace-row btile bot-row (1- (bsm-btile-rows btile)) 0)
+    (bsm-btile-replace-column btile left-col 2 0)
+    (bsm-btile-replace-column btile right-col 2 (1- (bsm-btile-cols btile)))
+
+    ;; Next, cut the inside of the btile up into cells and fill in the crates.
+    ;;
+    ;; TODO: Here we're gonna choose single characters for testing purposes. It
+    ;; should be some function to the number of crates along with readability
+    ;; criteria.
+    ;;
+    ;; TODO: I don't know what those are yet.
+    (let* ((view-inner-btile (bsm-btile))
+           (row-end (1+ (- (bsm-btile-rows btile) 3)))
+           (col-end (1+ (- (bsm-btile-cols btile) 2)))
+           (loc (bsm-loc))
+           (rendering-btile (bsm-btile)))
+      ;; The sub-btile of the entire renderable area used for
+      ;; crates in the view's btile is the view-inner-btile
+      (bsm-btile-make-subtile btile 2 1
+                              (- (bsm-btile-rows btile) 3)
+                              (- (bsm-btile-cols btile) 2)
+                              view-inner-btile)
+
+      ;; Now get each crate by location in grid and render it.
+      ;;
+      ;; TODO: We haven't properly figured out the size of the grid, so we're
+      ;; assuming 1x1.
+      (cl-loop
+       for r from 0 below (bsm-btile-rows view-inner-btile)
+       do (cl-loop
+           for c from 0 below (bsm-btile-cols view-inner-btile)
+           do
+           ;; The rendering-btile is the btile into which the crate is
+           ;; rendered.
+           (bsm-btile-make-subtile view-inner-btile r c 1 1 rendering-btile)
+
+           (setf (bsm-loc-y loc) r
+                 (bsm-loc-x loc) c)
+
+           ;; Just render crate at [r,c] into rendering-view.
+           ;;
+           ;; TODO: Take into consideration view-cursor location and centering
+           ;; it.
+           (when-let ((crate (bsm-view-get-crate view loc)))
+             (bsm-crate-render crate rendering-btile)))))))
+
+
+(defun bsm-view-test-render ()
+  "A test function."
+  (with-current-buffer "*bsm-space-display*"
+    (save-excursion
+      (let* ((btile (bsm-btile-make (current-buffer) (point) 80 16 16))
+             (entity (bsm-ent/buf-make (current-buffer)))
+             (crate (bsm-crate-make (bsm-loc-make 0 0) entity))
+             (view (bsm-view-make "test-view")))
+
+        ;; Fill the crate with something intereting.
+        (setf (bsm-crate-foreground-color crate) "white"
+              (bsm-crate-background-color crate) "blue"
+              (bsm-crate-pin-p crate) t)
+
+        (bsm-view-put-crate view crate)
+
+        (bsm-view-render view btile)))))
 
 ;; --------------------------------
 
@@ -819,7 +947,6 @@ view named: default."
 (defun bsm-debug-render (display-buffer display-window)
   "This function assumes it is called in a with-current-buffer form."
   (let ((time-format "%a %b %d %H:%M:%S %Z %Y\n"))
-    (erase-buffer)
     (insert (format-time-string time-format (current-time)))
     (insert (format "The window body (width, height) is: (%s, %s)\n"
                     (window-body-width) (window-body-height)))))
@@ -835,9 +962,10 @@ view named: default."
            (loc (bsm-loc-make 0 0))
            (sel-view (bsm-space-selected-view space)))
       (with-current-buffer display-buffer
-        ;;(bsm-debug-render display-buffer display-window)
-
         (erase-buffer)
+        ;;(bsm-debug-render display-buffer display-window)
+        ;; TODO: Make a btile for the entire drawable area of the window, and
+        ;; then draw a box using THAT interface, which is must better.
         (cl-loop for row from 0 below body-height
                  do (cl-loop
                      for col from 0 below body-width
@@ -858,36 +986,31 @@ view named: default."
                               (= col (1- body-width)))
                           (insert "|"))
                          (t
-                          ;; testing code for printing out a crate's entity.
-                          ;; TODO: The 1- is because we're in the inner border
-                          ;; of the ascii border. Make this math better.
-                          (setf (bsm-loc-x loc) (1- col)
-                                (bsm-loc-y loc) (1- row))
-                          (if-let* ((crate (bsm-view-get-crate sel-view loc))
-                                    (entity (bsm-crate-entity crate))
-                                    (name
-                                     (buffer-name (bsm-entity-item entity)))
-                                    (char (elt name 0)))
-                              ;; Denote * delimited buffers differently as a
-                              ;; test.
-                              (let ((nchar
-                                     (when (char-equal char ?*)
-                                       (elt name 1))))
-                                (insert
-                                 (propertize
-                                  (string (or nchar char))
-                                  'face (if nchar
-                                            '((:background "blue")
-                                              (:foreground "white"))
-                                          '((:background "darkorange4")
-                                            (:foreground "white"))))))
-                            ;; else case
-                            (insert " ")))))
+                          (insert " "))))
                  ;; NOTE: Last column is dedicated to newlines in the store.
                  ;; Otherwise the fringe might show up. Fix it later.
                  (insert ?\n))
+
         (goto-char 0)
-        ))))
+
+        ;; Draw all of the views in the right places.
+        ;; TODO: Fixme for having the space assign a location to all views, and
+        ;; for rendering all views.
+        (let* ((default-view (bsm-space-get-view space "default"))
+               (bbox (bsm-view-bbox default-view))
+               (bbox-width (bsm-bbox-width bbox))
+               (bbox-height (bsm-bbox-height bbox)))
+          (bsm-view-render default-view
+                           (bsm-btile-make
+                            (bsm-space-display-buffer space)
+                            ;; NOTE: 1+ to account for newline column in
+                            ;; display-buffer.
+                            (+ (* (1+ body-width) 5) 10) (1+ body-width)
+                            ;; These are in terms of the bbox of the view, we
+                            ;; need extra decoration around it to make a
+                            ;; minimum sized view display.
+                            (+ 3 bbox-height)
+                            (+ 2 bbox-width))))))))
 
 ;; --------------------------------
 
@@ -917,7 +1040,17 @@ view named: default."
                ;; Insert an entity into the right location.
                (let* ((entity (bsm-ent/buf-make buf))
                       (loc (bsm-loc-make x y))
+                      (name (buffer-name buf))
                       (crate (bsm-crate-make loc entity)))
+
+                 ;; TODO: Test pattern for now to test fore/back ground.
+                 (setf (bsm-crate-background-color crate)
+                       (if (zerop (mod i 2))
+                           "blue"
+                         "brown")
+
+                       (bsm-crate-foreground-color crate) "white")
+
                  (bsm-view-put-crate selected-view crate))))
 
     (setf *bsm-buffer-space* new-space)))
@@ -1024,6 +1157,7 @@ current workspace."
 
 (defun bsm-render ()
   (interactive)
+  (bsm-seed-buffer-space)
   (bsm-space-render *bsm-buffer-space*))
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
