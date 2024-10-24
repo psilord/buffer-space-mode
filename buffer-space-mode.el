@@ -202,7 +202,7 @@ trace and put it into the error message."
 (defun bsm-util-format-ind (indent fmt &rest objects)
   "Compute and return the rendered format string with the supplied
 fmt and objects, but put indent spaces infront of ot."
-  (apply 'format (concat (make-string indent ? ) fmt) objects))
+  (apply 'format (concat (make-string indent ?\s) fmt) objects))
 
 ;; TODO: maybe alter this to preserve properties and provide &option for
 ;; choosing this behavior.
@@ -231,7 +231,7 @@ maintain the same number of characters. Properties are not preserved."
           (if (< len-clipped-string num-range-chars)
               (concat clipped-string
                       (make-string (- num-range-chars len-clipped-string)
-                                   ? ))
+                                   ?\s))
             clipped-string)))
     (with-current-buffer buffer
       (save-excursion
@@ -440,6 +440,8 @@ arguments."
                     :initarg :bsm-btile-cols)))
 
 (defun bsm-btile-make (buffer pos stride rows cols)
+  (when (zerop pos)
+    (bsm-error "The first charpos index in a buffer is 1, not 0."))
   (bsm-btile :bsm-btile-buffer buffer
              :bsm-btile-pos pos
              :bsm-btile-stride stride
@@ -491,10 +493,11 @@ off the btile, do nothing (even if the string would have
 otherwise had a part of it show). Return t if anything was
 rendered into the buffer nil otherwise."
   (when (bsm-btile-valid-coordinate-p btile row col)
-    (let* ((start (bsm-btile-get-charpos btile row col))
-           (end (+ start col (min (- (bsm-btile-cols btile) col)
-                                  (length string)))))
-      (bsm-util-replace-string (bsm-btile-buffer btile) string start end)
+    (let* ((start-pos (bsm-btile-get-charpos btile row col))
+           (end-pos (+ start-pos (min (- (bsm-btile-cols btile) col)
+                                      (length string)))))
+      (bsm-util-replace-string (bsm-btile-buffer btile)
+                               string start-pos end-pos)
       t)))
 
 (defun bsm-btile-render-column (btile string row col)
@@ -762,7 +765,7 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
            ;; Here, get enough of the name of the
            (cpos (seq-position
                   name (seq-find (lambda (c)
-                                   (and (not (char-equal c ? ))
+                                   (and (not (char-equal c ?\s))
                                         (if (= width 1)
                                             (not (char-equal c ?*))
                                           t)))
@@ -1131,46 +1134,31 @@ view named: default."
   (when space
     (let* ((display-buffer (bsm-space-display-buffer space))
            (display-window (selected-window))
+           (stride (window-body-width))
            ;; Minus 1 because the last column is reserved for newlines.
-           (body-width (1- (window-body-width)))
+           (body-width (1- stride))
            (body-height (window-body-height))
            (loc (bsm-loc-make 0 0))
-           (sel-view (bsm-space-selected-view space)))
+           (sel-view (bsm-space-selected-view space))
+           (display-btile (bsm-btile-make display-buffer 1 stride
+                                          body-height body-width))
+           (display-boundary (bsm-bound/relative-make 0 0 0 0)))
       (with-current-buffer display-buffer
         (save-excursion
-          ;; Find a better way to handle these odd things for other
+          ;; TODO: Find a better way to handle these odd things for other
           ;; emacs modes
           (display-line-numbers-mode -1)
 
+          ;; MUST DO FIRST: Fill it with empty space.
           (erase-buffer)
+          ;; NOTE: Last column is dedicated to newlines in the display buffer.
+          ;; Otherwise the fringe will show up in tty mode.
+          (let ((empty-row (concat (make-string body-width ?\s) "\n")))
+            (cl-loop for row from 0 below body-height
+                     do (insert empty-row)))
 
-          ;;(bsm-debug-render display-buffer display-window)
-          ;; TODO: Make a btile for the entire drawable area of the window, and
-          ;; then draw a box using THAT interface, which is must better.
-          (cl-loop for row from 0 below body-height
-                   do (cl-loop
-                       for col from 0 below body-width
-                       do (cond
-                           ((or (and (= row 0)
-                                     (= col 0))
-                                (and (= row (1- body-height))
-                                     (= col (1- body-width)))
-                                (and (= row (1- body-height))
-                                     (= col 0))
-                                (and (= row 0)
-                                     (= col (1- body-width))))
-                            (insert "+"))
-                           ((or (= row 0)
-                                (= row (1- body-height)))
-                            (insert "-"))
-                           ((or (= col 0)
-                                (= col (1- body-width)))
-                            (insert "|"))
-                           (t
-                            (insert " "))))
-                   ;; NOTE: Last column is dedicated to newlines in the store.
-                   ;; Otherwise the fringe might show up. Fix it later.
-                   (insert ?\n))
+          ;; draw boundary for now cause it is a good sanity check.
+          (bsm-btile-render-boundary display-btile display-boundary)
 
           ;; Draw all of the views in the right places.
           ;;
