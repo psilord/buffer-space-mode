@@ -1117,6 +1117,9 @@ view named: default."
          (view-or-name "default")
          (view (bsm-space-put-view new-space view-or-name t)))
 
+    (with-current-buffer (bsm-space-display-buffer new-space)
+      (display-line-numbers-mode -1))
+
     new-space))
 
 (defun bsm-debug-render (display-buffer display-window)
