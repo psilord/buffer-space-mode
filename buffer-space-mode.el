@@ -7,7 +7,22 @@
 ;; Modes are called with M-x buffer-space-mode
 ;; However, this might only apply to the localized select buffer
 
-;; TODO Maybe use <f5> to bring up buffer-space?
+(defun bsm-undef-all (&optional perform-gc)
+  "unintern all symbols with *bsm- or bsm- as a prefix."
+  (cl-flet ((possibly-unintern (symbol)
+              (let ((name (symbol-name symbol)))
+                (if (or (string-prefix-p "bsm-" name)
+                        (string-prefix-p "*bsm-" name))
+                    (unintern symbol)))))
+    (mapatoms #'possibly-unintern)
+    (when perform-gc
+      (garbage-collect))))
+;; Wipe out all previous definitions cause I'm changing the API so much at this
+;; time.
+(bsm-undef-all)
+
+;; TODO: This really neeeds to be a major mode.
+
 (defconst buffer-space-mode-map
   ;; NOTE: You can update this, reload the file, and the changed keymap is in
   ;; effect--which is almost always what you want.
@@ -313,6 +328,84 @@ If it is not present return the default."
 
 ;; --------------------------------
 
+;; This base class represents a rectangular (at this time) boundary wholly
+;; contained in a (often) btile which can be rendered given suitable
+;; descriptions of where to render it in a derived class. Each side of the
+;; boundary can be "open" which means a directional rendering is put there, or
+;; "closed" meaning a "wall like" rendering is put there.
+(defclass bsm-boundary ()
+  ((%bsm-boundary-open-top-p :accessor bsm-boundary-open-top-p
+                             :initarg :bsm-boundary-open-top-p
+                             :initform nil)
+   (%bsm-boundary-open-right-p :accessor bsm-boundary-open-right-p
+                               :initarg :bsm-boundary-open-right-p
+                               :initform nil)
+   (%bsm-boundary-open-bottom-p :accessor bsm-boundary-open-bottom-p
+                                :initarg :bsm-boundary-open-bottom-p
+                                :initform nil)
+   (%bsm-boundary-open-left-p :accessor bsm-boundary-open-left-p
+                              :initarg :bsm-boundary-open-left-p
+                              :initform nil)))
+
+;; Describe a rectangular boundary starting from [start-row, start-col] to
+;; [end-row, end-col]. Note carefully the coordinates are _inclusive_.
+(defclass bsm-bound/static (bsm-boundary)
+  ((%bsm-bound/static-start-row :accessor bsm-bound/static-start-row
+                                :initarg :bsm-bound/static-start-row)
+   (%bsm-bound/static-start-col :accessor bsm-bound/static-start-col
+                                :initarg :bsm-bound/static-start-col)
+   (%bsm-bound/static-end-row :accessor bsm-bound/static-end-row
+                              :initarg :bsm-bound/static-end-row)
+   (%bsm-bound/static-end-col :accessor bsm-bound/static-end-col
+                              :initarg :bsm-bound/static-end-col)))
+
+;; Describe a rectangular boundary by how many rows to reserve away from the
+;; outer top, right, bottom, and left sides individually.
+(defclass bsm-bound/relative (bsm-boundary)
+  ((%bsm-bound/relative-top-reserve
+    :accessor bsm-bound/relative-top-reserve
+    :initarg :bsm-bound/relative-top-reserve)
+   (%bsm-bound/relative-right-reserve
+    :accessor bsm-bound/relative-right-reserve
+    :initarg :bsm-bound/relative-right-reserve)
+   (%bsm-bound/relative-bottom-reserve
+    :accessor bsm-bound/relative-bottom-reserve
+    :initarg :bsm-bound/relative-bottom-reserve)
+   (%bsm-bound/relative-left-reserve
+    :accessor bsm-bound/relative-left-reserve
+    :initarg :bsm-bound/relative-left-reserve)))
+
+
+(defun bsm-bound/static-make (start-row start-col end-row end-col
+                                        &optional open-top-p open-right-p
+                                        open-bottom-p open-left-p)
+  "Construct and return a bsm-bound/static instance filled with the supplied
+arguments."
+  (bsm-bound/static :bsm-bound/static-start-row start-row
+                    :bsm-bound/static-start-col start-col
+                    :bsm-bound/static-end-row end-row
+                    :bsm-bound/static-end-col end-col
+                    :bsm-boundary-open-top-p open-top-p
+                    :bsm-boundary-open-right-p open-right-p
+                    :bsm-boundary-open-bottom-p open-bottom-p
+                    :bsm-boundary-open-left-p open-left-p))
+
+(defun bsm-bound/relative-make (top-reserve right-reserve bottom-reserve
+                                            left-reserve
+                                            &optional open-top-p open-right-p
+                                            open-bottom-p open-left-p)
+  "Construct and return a bsm-bound/relative instance filled with the supplied
+arguments."
+  (bsm-bound/relative :bsm-bound/relative-top-reserve top-reserve
+                      :bsm-bound/relative-right-reserve right-reserve
+                      :bsm-bound/relative-bottom-reserve bottom-reserve
+                      :bsm-bound/relative-left-reserve left-reserve
+                      :bsm-boundary-open-top-p open-top-p
+                      :bsm-boundary-open-right-p open-right-p
+                      :bsm-boundary-open-left-p open-left-p))
+
+;; --------------------------------
+
 ;; This class represents a _preclipped_ rectangle subregion (or a tile) in an
 ;; emacs *bsm-display-buffer* buffer. The btile is ALWAYS referenced to an
 ;; absolute character position in the actual display buffer.  The buffer object
@@ -321,7 +414,9 @@ If it is not present return the default."
 ;; buffer must be filled with the exact number of characters (with newlines at
 ;; end of line) as fits into an emacs window for the postiion and stride to
 ;; work out in a tile. The newlines are present to prevent the fringe from
-;; being printed out.
+;; being printed out. Note: btiles don't have boundaries in them. The thing
+;; using the btile deals with boundary management and rendering the boundary
+;; in the btile via utility functions.
 ;;
 ;; NOTE: Fringes cannot be turned off in tty mode, so the newline
 ;; representation must stay to keep a clean fringe area in tty mode.
@@ -376,7 +471,7 @@ Return the reference to the new, or passed in target-btile, btile."
     sub-btile))
 
 (defun bsm-btile-valid-coordinate-p (btile row col)
-  "Return true if row,col specifies a location inside the btile."
+  "Return true if row,col specifies a location inclusive to the btile."
   (and (>= row 0)
        (< row (bsm-btile-rows btile))
        (>= col 0)
@@ -386,7 +481,7 @@ Return the reference to the new, or passed in target-btile, btile."
   "Return the character position of the row,col coordinate in this btile."
   (+ (bsm-btile-pos btile) (* row (bsm-btile-stride btile)) col))
 
-(defun bsm-btile-replace-row (btile string row col)
+(defun bsm-btile-render-row (btile string row col)
   "Render the string into the buffer starting at the relative
 position of row,col in the btile, up to length of string
 characters in the row. If the string is too big to fit into the
@@ -401,7 +496,7 @@ rendered into the buffer nil otherwise."
       (bsm-util-replace-string (bsm-btile-buffer btile) string start end)
       t)))
 
-(defun bsm-btile-replace-column (btile string row col)
+(defun bsm-btile-render-column (btile string row col)
   "Render the string into the buffer starting at the relative
 position of row,col in the btile, up to length of string
 characters in the column. If the string is too big to fit into
@@ -419,6 +514,88 @@ rendered into the buffer nil otherwise."
           (bsm-util-replace-string
            (bsm-btile-buffer btile) c current-row-pos (1+ current-row-pos))))
       t)))
+
+(defun bsm-btile-%render-boundary (btile
+                                   start-row start-col end-row end-col
+                                   &optional open-top-p open-right-p
+                                   open-bottom-p open-left-p)
+  "Render a boundary into the btile starting from [start-row, start-col] to
+[end-row, end-col], inclusive. Use + for the corners. Use | for
+the left and right sides. Use - for the top and bottom sides.  If
+open-top-p is true, then replace the - with ^ on the top side. If
+open-right-p is true, then replace | with > on the right side. If
+open-bottom-p is true, then replace - with v on the bottom. If
+open-left-p is true, then replace | with < on the left side. The
+btile MUST be at least 2 by 2 AND the boundary must be at least 2
+by 2. In addition, start-row must be less than end-row and
+start-col must be less than end-col. If not, or, for whatever
+reason we don't have enough space, do no rendering. Return t if
+rendering happened, nil otherwise."
+  (let ((btile-rows (bsm-btile-rows btile))
+        (btile-cols (bsm-btile-cols btile))
+        (bnd-rows (abs (- end-row start-row)))
+        (bnd-cols (abs (- end-col start-col)))
+        (char-closed-top ?-)
+        (char-open-top ?^)
+        (char-closed-right ?|)
+        (char-open-right ?>)
+        (char-closed-bottom ?-)
+        (char-open-bottom ?v)
+        (char-closed-left ?|)
+        (char-open-left ?<))
+    (unless (and (>= btile-rows 2)
+                 (>= btile-cols 2)
+                 (>= bnd-rows 2)
+                 (>= bnd-cols 2)
+                 (> end-row start-row)
+                 (> end-col start-col)
+                 (bsm-btile-valid-coordinate-p btile start-row start-col)
+                 (bsm-btile-valid-coordinate-p btile end-row end-col))
+      (let* ((top-char (if open-top char-open-top char-closed-top))
+             (right-char (if open-right char-open-right char-closed-right))
+             (bottom-char (if open-bottom char-open-bottom char-closed-bottom))
+             (left-char (if open-left char-open-left char-closed-left))
+             (top-row-inner (make-string top-char (- bnd-cols 2)))
+             (top-row (concat "+" top-row-inner "+"))
+             (right-col (make-string right-char (- bnd-rows 2)))
+             (bottom-row-inner (make-string bottom-char (- bnd-cols 2)))
+             (bottom-row (concat "+" bottom-row-inner "+"))
+             (left-col (make-string left-char (- bnd-rows 2))))
+        (bsm-btile-render-row btile top-row start-row start-col)
+        (bsm-btile-render-column btile right-col (1+ start-row) end-col)
+        (bsm-btile-render-row btile bottom-row end-row start-col)
+        (bsm-btile-render-column btile left-col (1+ start-row) start-col)
+        t))))
+
+(cl-defmethod bsm-btile-render-boundary (btile (boundary bsm-bound/static))
+  ;; Directly use the static model.
+  (bsm-btile-%render-boundary btile
+                              (bsm-bound/static-start-row boundary)
+                              (bsm-bound/static-start-col boundary)
+                              (bsm-bound/static-end-row boundary)
+                              (bsm-bound/static-end-col boundary)
+                              (bsm-boundary-open-top-p boundary)
+                              (bsm-boundary-open-right-p boundary)
+                              (bsm-boundary-open-bottom-p boundary)
+                              (bsm-boundary-open-left-p boundary)))
+
+(cl-defmethod bsm-btile-render-boundary (btile (boundary bsm-bound/relative))
+  ;; Convert the static model, inclusive boundaries.
+  (let ((start-row (bsm-bound/relative-top-reserve boundary))
+        (start-col (bsm-bound/relative-left-reserve boundary))
+        (end-row (- (1- (btile-rows btile))
+                    (bsm-bound/relative-bottom-reserve boundary)))
+        (end-col) (- (1- (btile-cols btile))
+                     (bsm-bound/relative-right-reserve boundary))))
+  (bsm-btile-%render-boundary btile
+                              start-row
+                              start-col
+                              end-row
+                              end-col
+                              (bsm-boundary-open-top-p boundary)
+                              (bsm-boundary-open-right-p boundary)
+                              (bsm-boundary-open-bottom-p boundary)
+                              (bsm-boundary-open-left-p boundary)))
 
 ;; --------------------------------
 
@@ -589,7 +766,7 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
                              `((:underline t)))))
            (prop-short-name
             (propertize short-name 'face properties)))
-      (bsm-btile-replace-row btile prop-short-name 0 0))))
+      (bsm-btile-render-row btile prop-short-name 0 0))))
 
 (defun bsm-crate-test-render ()
   "A test function."
@@ -648,8 +825,6 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
           (> (bsm-loc-y loc) (bsm-bbox-max-y bbox)))
       (setf (bsm-bbox-max-y bbox) (bsm-loc-y loc))))
 
-;; TODO: If there is a single point in the view, then, technically, the
-;; bounding box has 0 size.
 (defun bsm-bbox-width (bbox)
   (let ((min-x (bsm-bbox-min-x bbox))
         (max-x (bsm-bbox-max-x bbox)))
@@ -657,8 +832,6 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
         (abs (1+ (- max-x min-x)))
       0)))
 
-;; TODO: If there is a single point in the view, then, technically, the
-;; bounding box has 0 size.
 (defun bsm-bbox-height (bbox)
   (let ((min-y (bsm-bbox-min-y bbox))
         (max-y (bsm-bbox-max-y bbox)))
@@ -796,7 +969,7 @@ range of [start, end)."
   (let* ((view-name (bsm-view-name view))
          (prop-view-name view-name)
          (view-title (concat "| " prop-view-name)))
-    (bsm-btile-replace-row btile view-title 0 0))
+    (bsm-btile-render-row btile view-title 0 0))
 
   ;; Next, draw the box boundaries.
   (let* ((top/bot-num-border (- (bsm-btile-cols btile) 2))
@@ -808,10 +981,10 @@ range of [start, end)."
 
     ;; TODO: fixup to draw extension boundaries based on bbox with cursor
     ;; in the middle of the btile.
-    (bsm-btile-replace-row btile top-row 1 0)
-    (bsm-btile-replace-row btile bot-row (1- (bsm-btile-rows btile)) 0)
-    (bsm-btile-replace-column btile left-col 2 0)
-    (bsm-btile-replace-column btile right-col 2 (1- (bsm-btile-cols btile)))
+    (bsm-btile-render-row btile top-row 1 0)
+    (bsm-btile-render-row btile bot-row (1- (bsm-btile-rows btile)) 0)
+    (bsm-btile-render-column btile left-col 2 0)
+    (bsm-btile-render-column btile right-col 2 (1- (bsm-btile-cols btile)))
 
     ;; Next, cut the inside of the btile up into cells and fill in the crates.
     ;;
@@ -962,55 +1135,55 @@ view named: default."
            (loc (bsm-loc-make 0 0))
            (sel-view (bsm-space-selected-view space)))
       (with-current-buffer display-buffer
-        (erase-buffer)
-        ;;(bsm-debug-render display-buffer display-window)
-        ;; TODO: Make a btile for the entire drawable area of the window, and
-        ;; then draw a box using THAT interface, which is must better.
-        (cl-loop for row from 0 below body-height
-                 do (cl-loop
-                     for col from 0 below body-width
-                     do (cond
-                         ((or (and (= row 0)
-                                   (= col 0))
-                              (and (= row (1- body-height))
-                                   (= col (1- body-width)))
-                              (and (= row (1- body-height))
-                                   (= col 0))
-                              (and (= row 0)
-                                   (= col (1- body-width))))
-                          (insert "+"))
-                         ((or (= row 0)
-                              (= row (1- body-height)))
-                          (insert "-"))
-                         ((or (= col 0)
-                              (= col (1- body-width)))
-                          (insert "|"))
-                         (t
-                          (insert " "))))
-                 ;; NOTE: Last column is dedicated to newlines in the store.
-                 ;; Otherwise the fringe might show up. Fix it later.
-                 (insert ?\n))
+        (save-excursion
+          (erase-buffer)
+          ;;(bsm-debug-render display-buffer display-window)
+          ;; TODO: Make a btile for the entire drawable area of the window, and
+          ;; then draw a box using THAT interface, which is must better.
+          (cl-loop for row from 0 below body-height
+                   do (cl-loop
+                       for col from 0 below body-width
+                       do (cond
+                           ((or (and (= row 0)
+                                     (= col 0))
+                                (and (= row (1- body-height))
+                                     (= col (1- body-width)))
+                                (and (= row (1- body-height))
+                                     (= col 0))
+                                (and (= row 0)
+                                     (= col (1- body-width))))
+                            (insert "+"))
+                           ((or (= row 0)
+                                (= row (1- body-height)))
+                            (insert "-"))
+                           ((or (= col 0)
+                                (= col (1- body-width)))
+                            (insert "|"))
+                           (t
+                            (insert " "))))
+                   ;; NOTE: Last column is dedicated to newlines in the store.
+                   ;; Otherwise the fringe might show up. Fix it later.
+                   (insert ?\n))
 
-        (goto-char 0)
-
-        ;; Draw all of the views in the right places.
-        ;; TODO: Fixme for having the space assign a location to all views, and
-        ;; for rendering all views.
-        (let* ((default-view (bsm-space-get-view space "default"))
-               (bbox (bsm-view-bbox default-view))
-               (bbox-width (bsm-bbox-width bbox))
-               (bbox-height (bsm-bbox-height bbox)))
-          (bsm-view-render default-view
-                           (bsm-btile-make
-                            (bsm-space-display-buffer space)
-                            ;; NOTE: 1+ to account for newline column in
-                            ;; display-buffer.
-                            (+ (* (1+ body-width) 5) 10) (1+ body-width)
-                            ;; These are in terms of the bbox of the view, we
-                            ;; need extra decoration around it to make a
-                            ;; minimum sized view display.
-                            (+ 3 bbox-height)
-                            (+ 2 bbox-width))))))))
+          ;; Draw all of the views in the right places.
+          ;;
+          ;; TODO: Fixme for having the space assign a location to all views,
+          ;; and for rendering all views.
+          (let* ((default-view (bsm-space-get-view space "default"))
+                 (bbox (bsm-view-bbox default-view))
+                 (bbox-width (bsm-bbox-width bbox))
+                 (bbox-height (bsm-bbox-height bbox)))
+            (bsm-view-render default-view
+                             (bsm-btile-make
+                              (bsm-space-display-buffer space)
+                              ;; NOTE: 1+ to account for newline column in
+                              ;; display-buffer.
+                              (+ (* (1+ body-width) 5) 10) (1+ body-width)
+                              ;; These are in terms of the bbox of the view, we
+                              ;; need extra decoration around it to make a
+                              ;; minimum sized view display.
+                              (+ 3 bbox-height)
+                              (+ 2 bbox-width)))))))))
 
 ;; --------------------------------
 
@@ -1047,7 +1220,7 @@ view named: default."
                  (setf (bsm-crate-background-color crate)
                        (if (zerop (mod i 2))
                            "blue"
-                         "brown")
+                         "magenta")
 
                        (bsm-crate-foreground-color crate) "white")
 
