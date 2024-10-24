@@ -534,8 +534,9 @@ reason we don't have enough space, do no rendering. Return t if
 rendering happened, nil otherwise."
   (let ((btile-rows (bsm-btile-rows btile))
         (btile-cols (bsm-btile-cols btile))
-        (bnd-rows (abs (- end-row start-row)))
-        (bnd-cols (abs (- end-col start-col)))
+        ;; 1+ to count the number of rows and cols from the inclusive bounds.
+        (bnd-rows (abs (1+ (- end-row start-row))))
+        (bnd-cols (abs (1+ (- end-col start-col))))
         (char-closed-top ?-)
         (char-open-top ?^)
         (char-closed-right ?|)
@@ -544,24 +545,33 @@ rendering happened, nil otherwise."
         (char-open-bottom ?v)
         (char-closed-left ?|)
         (char-open-left ?<))
-    (unless (and (>= btile-rows 2)
-                 (>= btile-cols 2)
-                 (>= bnd-rows 2)
-                 (>= bnd-cols 2)
-                 (> end-row start-row)
-                 (> end-col start-col)
-                 (bsm-btile-valid-coordinate-p btile start-row start-col)
-                 (bsm-btile-valid-coordinate-p btile end-row end-col))
-      (let* ((top-char (if open-top char-open-top char-closed-top))
-             (right-char (if open-right char-open-right char-closed-right))
-             (bottom-char (if open-bottom char-open-bottom char-closed-bottom))
-             (left-char (if open-left char-open-left char-closed-left))
-             (top-row-inner (make-string top-char (- bnd-cols 2)))
+
+    (when (and (>= btile-rows 2)
+               (>= btile-cols 2)
+               (>= bnd-rows 2)
+               (>= bnd-cols 2)
+               (> end-row start-row)
+               (> end-col start-col)
+               (bsm-btile-valid-coordinate-p btile start-row start-col)
+               (bsm-btile-valid-coordinate-p btile end-row end-col))
+      (let* ((char-top (if open-top-p
+                           char-open-top
+                         char-closed-top))
+             (char-right (if open-right-p
+                             char-open-right
+                           char-closed-right))
+             (char-bottom (if open-bottom-p
+                              char-open-bottom
+                            char-closed-bottom))
+             (char-left (if open-left-p
+                            char-open-left
+                          char-closed-left))
+             (top-row-inner (make-string (- bnd-cols 2) char-top))
              (top-row (concat "+" top-row-inner "+"))
-             (right-col (make-string right-char (- bnd-rows 2)))
-             (bottom-row-inner (make-string bottom-char (- bnd-cols 2)))
+             (right-col (make-string (- bnd-rows 2) char-right))
+             (bottom-row-inner (make-string (- bnd-cols 2) char-bottom))
              (bottom-row (concat "+" bottom-row-inner "+"))
-             (left-col (make-string left-char (- bnd-rows 2))))
+             (left-col (make-string (- bnd-rows 2) char-left)))
         (bsm-btile-render-row btile top-row start-row start-col)
         (bsm-btile-render-column btile right-col (1+ start-row) end-col)
         (bsm-btile-render-row btile bottom-row end-row start-col)
@@ -580,23 +590,25 @@ rendering happened, nil otherwise."
                               (bsm-boundary-open-bottom-p boundary)
                               (bsm-boundary-open-left-p boundary)))
 
+;; If 0 is given for the relative boundaries, then the largest boundary that
+;; can be rendered into the btile will be rendered.
 (cl-defmethod bsm-btile-render-boundary (btile (boundary bsm-bound/relative))
   ;; Convert the static model, inclusive boundaries.
   (let ((start-row (bsm-bound/relative-top-reserve boundary))
         (start-col (bsm-bound/relative-left-reserve boundary))
-        (end-row (- (1- (btile-rows btile))
+        (end-row (- (1- (bsm-btile-rows btile))
                     (bsm-bound/relative-bottom-reserve boundary)))
-        (end-col) (- (1- (btile-cols btile))
-                     (bsm-bound/relative-right-reserve boundary))))
-  (bsm-btile-%render-boundary btile
-                              start-row
-                              start-col
-                              end-row
-                              end-col
-                              (bsm-boundary-open-top-p boundary)
-                              (bsm-boundary-open-right-p boundary)
-                              (bsm-boundary-open-bottom-p boundary)
-                              (bsm-boundary-open-left-p boundary)))
+        (end-col (- (1- (bsm-btile-cols btile))
+                    (bsm-bound/relative-right-reserve boundary))))
+    (bsm-btile-%render-boundary btile
+                                start-row
+                                start-col
+                                end-row
+                                end-col
+                                (bsm-boundary-open-top-p boundary)
+                                (bsm-boundary-open-right-p boundary)
+                                (bsm-boundary-open-bottom-p boundary)
+                                (bsm-boundary-open-left-p boundary))))
 
 ;; --------------------------------
 
@@ -973,19 +985,8 @@ range of [start, end)."
     (bsm-btile-render-row btile view-title 0 0))
 
   ;; Next, draw the box boundaries.
-  (let* ((top/bot-num-border (- (bsm-btile-cols btile) 2))
-         (left/right-num-border (- (bsm-btile-cols btile) 3))
-         (top-row (concat "+" (make-string top/bot-num-border ?-) "+"))
-         (bot-row (concat "+" (make-string top/bot-num-border ?-) "+"))
-         (left-col (make-string left/right-num-border ?|))
-         (right-col (make-string left/right-num-border ?|)))
-
-    ;; TODO: fixup to draw extension boundaries based on bbox with cursor
-    ;; in the middle of the btile.
-    (bsm-btile-render-row btile top-row 1 0)
-    (bsm-btile-render-row btile bot-row (1- (bsm-btile-rows btile)) 0)
-    (bsm-btile-render-column btile left-col 2 0)
-    (bsm-btile-render-column btile right-col 2 (1- (bsm-btile-cols btile)))
+  (let* ((boundary (bsm-bound/relative-make 1 0 0 0)))
+    (bsm-btile-render-boundary btile boundary)
 
     ;; Next, cut the inside of the btile up into cells and fill in the crates.
     ;;
