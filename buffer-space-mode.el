@@ -1117,9 +1117,6 @@ view named: default."
          (view-or-name "default")
          (view (bsm-space-put-view new-space view-or-name t)))
 
-    (with-current-buffer (bsm-space-display-buffer new-space)
-      (display-line-numbers-mode -1))
-
     new-space))
 
 (defun bsm-debug-render (display-buffer display-window)
@@ -1141,7 +1138,12 @@ view named: default."
            (sel-view (bsm-space-selected-view space)))
       (with-current-buffer display-buffer
         (save-excursion
+          ;; Find a better way to handle these odd things for other
+          ;; emacs modes
+          (display-line-numbers-mode -1)
+
           (erase-buffer)
+
           ;;(bsm-debug-render display-buffer display-window)
           ;; TODO: Make a btile for the entire drawable area of the window, and
           ;; then draw a box using THAT interface, which is must better.
