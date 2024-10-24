@@ -402,6 +402,7 @@ arguments."
                       :bsm-bound/relative-left-reserve left-reserve
                       :bsm-boundary-open-top-p open-top-p
                       :bsm-boundary-open-right-p open-right-p
+                      :bsm-boundary-open-bottom-p open-bottom-p
                       :bsm-boundary-open-left-p open-left-p))
 
 ;; --------------------------------
