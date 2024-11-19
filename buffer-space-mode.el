@@ -1357,7 +1357,7 @@ for each chunk of information."
           (let* ((default-view (bsm-space-get-view space "default")))
 
             (bsm-btile-layout-subtile display-btile
-                                      5 10
+                                      7 2
                                       (bsm-view-rows default-view)
                                       (bsm-view-cols default-view)
                                       (bsm-view-btile default-view))
