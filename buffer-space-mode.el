@@ -21,7 +21,7 @@
 ;; time.
 (bsm-undef-all)
 
-;; TODO: This really neeeds to be a major mode.
+;; TODO: This really neeeeeeds to be a major mode.
 
 (defconst buffer-space-mode-map
   ;; NOTE: You can update this, reload the file, and the changed keymap is in
@@ -31,7 +31,21 @@
     ;;(define-key map [right] 'bsm-look-right)
     ;;(define-key map [up] 'bsm-look-up)
     ;;(define-key map [down] 'bsm-look-down)
+
     (define-key map (kbd "<f5>") 'bsm-render)
+
+    ;; increase and decrease the defalt-view's size.
+    (define-key map (kbd "M-<right>") 'bsm-increase-default-view-cols)
+    (define-key map (kbd "M-<left>") 'bsm-decrease-default-view-cols)
+    (define-key map (kbd "M-<down>") 'bsm-increase-default-view-rows)
+    (define-key map (kbd "M-<up>") 'bsm-decrease-default-view-rows)
+
+    ;; zoom in and out the default view.
+    (define-key map (kbd "C-<left>") 'bsm-zoom-in-cols-default-view)
+    (define-key map (kbd "C-<right>") 'bsm-zoom-out-cols-default-view)
+    (define-key map (kbd "C-<up>") 'bsm-zoom-in-rows-default-view)
+    (define-key map (kbd "C-<down>") 'bsm-zoom-out-rows-default-view)
+
     map))
 
 (define-minor-mode buffer-space-mode
@@ -262,6 +276,22 @@ return in that context."
         nil
       results)))
 
+(defun bsm-util-abbreviate-string (string size &optional justify)
+  "Return an abbreviation of the string that fits exactly into the
+size. The minimum size is 1. If the size is larger than the
+string, then look at justify. If it is nil or :left, then
+justify to the left. If :right then justify on the right, if
+:middle, then justify in the middle. This abbrev function could
+be much smarter, but for now it just does something simple."
+
+  ;; TODO: This function needs MUCH more work and an implementation of justify.
+
+  (cl-assert (>= size 1))
+  (cl-assert (or (eq justify nil)
+                 (eq justify :left)))
+
+  (let ((trimmed-string (string-trim string)))
+    (subseq trimmed-string 0 (min size (length trimmed-string)))))
 
 ;; --------------------------------
 
@@ -448,13 +478,14 @@ arguments."
              :bsm-btile-rows rows
              :bsm-btile-cols cols))
 
-(defun bsm-btile-make-subtile (btile subrow-start subcol-start num-rows
-                                     num-cols &optional target-btile)
+(defun bsm-btile-layout-subtile (btile subrow-start subcol-start num-rows
+                                       num-cols &optional target-btile)
 
   "Construct a new (or fill in target-btile if supplied) tile that is a
-fully contained subregion of the btile. The subrectangle starts at
-[subrow-start, subcol-start] and is num-rows and num-cols in extent.
-Return the reference to the new, or passed in target-btile, btile."
+fully contained subregion of the btile. The subrectangle starts
+at [subrow-start, subcol-start] and is (num-rows, num-cols) in
+extent.  Return the reference to the new btile, or the passed in
+target-btile."
 
   (unless (and (>= subrow-start 0)
                (>= subcol-start 0)
@@ -724,7 +755,14 @@ if they represent the exact same coordinate."
    ;; The entity being held by this crate.
    (%bsm-crate-entity :accessor bsm-crate-entity
                       :initarg :bsm-crate-entity
-                      :initform nil)))
+                      :initform nil)
+   ;; The crate will render to this btile. However it is the view in which
+   ;; this crate is contained that populates this btile's slots with valid
+   ;; information before a render.
+   (%bsm-crate-btile :accessor bsm-crate-btile
+                     :initarg :bsm-crate-btile
+                     :initform (bsm-btile))
+   ))
 
 (defun bsm-crate-make (loc entity)
   "Construct and return a crate with the specifed location loc and
@@ -736,12 +774,24 @@ entity."
 ;; TODO: Check if there is a reinitialize-instance equivalent in eieio and use
 ;; that so we can do it with supplying initargs too.
 (defun bsm-crate-reinitialize (crate)
-  "Reinitialize the crate to defaults, EXCEPT the location, and return it."
+  "Reinitialize the crate to defaults, EXCEPT the location and
+btile, then return it."
   (setf (bsm-crate-pin-p crate) nil
         (bsm-crate-background-color crate) nil
         (bsm-crate-foreground-color crate) nil
         (bsm-crate-entity crate) nil)
   crate)
+
+(defun bsm-crate-layout (crate buffer pos stride rows cols)
+  "Update the btile located in this crate with new rendering information.
+Return the btile."
+  (let ((btile (bsm-crate-btile crate)))
+    (setf (bsm-btile-buffer btile) buffer
+          (bsm-btile-pos btile) pos
+          (bsm-btile-stride btle) stride
+          (bsm-btile-rows btile) rows
+          (bsm_btile-cols btile) cols)
+    btile))
 
 (defun bsm-crate-is-item (crate item &optional eq-func)
   "Return true if the item held by the entity in the crate is
@@ -752,16 +802,17 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
                (bsm-entity-item entity)
                item))))
 
-(defun bsm-crate-render (crate btile)
-  "Render the crate using whatever space is provided it in the btile."
-  ;; TODO: Currently we render into exactly one row only. We don't utilize
-  ;; the 2d tile space at all if asked to do so. This needs improvement.
-  (when-let ((entity (bsm-crate-entity crate)))
+(defun bsm-crate-render (crate)
+  "Render the crate into the space indicate by the internal and
+previously laid out btile."
+  (when-let ((entity (bsm-crate-entity crate))
+             (btile (bsm-crate-btile crate)))
     (let* ((id (bsm-entity-id entity))
            (name (if (bsm-id-use-name-p id)
                      (bsm-id-name id)
                    (buffer-name (bsm-entity-item entity))))
            (width (bsm-btile-cols btile))
+           (height (bsm-btile-rows btile))
            ;; Here, get enough of the name of the
            (cpos (seq-position
                   name (seq-find (lambda (c)
@@ -781,8 +832,22 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
                          ,@(when pinned-p
                              `((:underline t)))))
            (prop-short-name
-            (propertize short-name 'face properties)))
-      (bsm-btile-render-row btile prop-short-name 0 0))))
+            (propertize short-name 'face properties))
+
+           (empty-string (make-string width ?\.))
+           (prop-empty-string (propertize empty-string
+                                          'face `((:background ,back-color)
+                                                  (:foreground ,fore-color)))))
+
+      (bsm-btile-render-row btile prop-short-name 0 0)
+
+      ;; TODO: We test a 2d crate tile being flled in. But this should be made
+      ;; actually real with something.
+      (cl-loop for r from 1 below height
+               do (bsm-btile-render-row
+                   btile
+                   prop-empty-string
+                   r 0)))))
 
 (defun bsm-crate-test-render ()
   "A test function."
@@ -867,23 +932,56 @@ equivalent to the supplied item via the eq-func--otherwise return nil."
    (%bsm-view-id :reader bsm-view-id
                  :initarg :bsm-view-id
                  :initform (bsm-id))
-   ;; a single collection of crates in a sparse geometric indexing
+   ;; A single collection of crates in a sparse geometric indexing
    (%bsm-view-crates :reader bsm-view-crates
                      :initarg :bsm-view-crates
-                     ;; KEY: location, VALUE: crate
+                     ;; KEY: bsm-loc, VALUE: bsm-crate
                      :initform (make-hash-table :test 'bsm-loc-equal/ht))
-   ;; The minimal bounding box containing all the points.
+   ;; The minimal bounding box containing all the points in the point space.
    (%bsm-view-bbox :reader bsm-view-bbox
                    :initarg :bsm-view-bbox
                    :initform (bsm-bbox))
    ;; NOTE: The cursor location in this view. nil means we don't have any idea
    ;; where the cursor is and need to pick one (hopefully corresponding to the
-   ;; buffer we're doing the request from). If there are more than one crates
+   ;; buffer we're doing the request from). If there are more than one crate
    ;; holding the buffer and we have nil, then randomly pick one, otherwise see
    ;; if one of the crates matches the current cursor, and of so use that one.
    (%bsm-view-cursor-location :accessor bsm-view-cursor-location
                               :initarg :bsm-view-cursor-location
-                              :initform nil)))
+                              :initform nil)
+
+   ;; Each crate gets this many cols when rendering.
+   ;; This value is clamped from 1 to the cols of the view.
+   (%bsm-view-crate-cols :accessor bsm-view-crate-cols
+                         :initarg :bsm-view-crate-cols
+                         :initform 4)
+
+   ;; Each crate gets this many rows when rendering.
+   ;; This value is clamped from 1 to the rows of the view.
+   (%bsm-view-crate-rows :accessor bsm-view-crate-rows
+                         :initarg :bsm-view-crate-rows
+                         :initform 1)
+
+   ;; How many cols the view is. This is clamped to [4, availspace)
+   ;; This includes *everything* for rendering this view, including the
+   ;; title bar, and boundary.
+   (%bsm-view-cols :accessor bsm-view-cols
+                   :initarg :bsm-view-cols
+                   :initform 27)
+
+   ;; How many rows this view has. This is clamped to [4, availspace)
+   ;; This includes *everything* for rendering this view, including the
+   ;; title bar, and boundary.
+   (%bsm-view-rows :accessor bsm-view-rows
+                   :initarg :bsm-view-rows
+                   :initform 19)
+
+   ;; The btile into which this view will render its crates and any additional
+   ;; information. The owner of the view decides what information is in this
+   ;; btile during the layout phase.
+   (%bsm-view-btile :accessor bsm-view-btile
+                    :initarg :bsm-view-btile
+                    :initform (bsm-btile))))
 
 (defun bsm-view-assert-name (view)
   "Check that a bsm-view instance has a defined name."
@@ -954,11 +1052,37 @@ show up in the view."
    (bsm-view-crates view)
    t))
 
-
-(defun bsm-view-render-location (view btile)
-  "Render the location into the display buffer, but only within the
-range of [start, end)."
+(defun bsm-view-get-cursor-charpos (view btile)
+  "Return the charpos of where the cursor is in the view's coordinate
+system as rendered into the btile."
+  ;; TODO: Implement me.
+  ;;
+  ;; Reconcile the coordinate system in which this cursor is returned.
   nil)
+
+(defun bsm-view-layout (view buffer pos stride rows cols)
+  "Update the internal btile with the new layout information. Return
+the btile."
+  (let ((btile (bsm-view-btile crate)))
+    (setf (bsm-btile-buffer btile) buffer
+          (bsm-btile-pos btile) pos
+          (bsm-btile-stride btle) stride
+          (bsm-btile-rows btile) rows
+          (bsm_btile-cols btile) cols)
+    btile))
+
+;; TODO: Still don't know if I need this.
+(defun bsm-view-render-location (view)
+
+  nil)
+
+(defun bsm-view-render-name (view)
+  "Render the view's name into the first row of its btile."
+  (let* ((view-name (bsm-view-name view))
+         (btile (bsm-view-btile view))
+         (prop-view-name view-name)
+         (view-title (concat "| " prop-view-name)))
+    (bsm-btile-render-row btile view-title 0 0)))
 
 ;; The space has given the view a btile into which it must render the whole
 ;; of itself. The View will split this up into smaller btiles into which
@@ -975,99 +1099,129 @@ range of [start, end)."
 ;;
 ;; TODO: For now, we assume a btile for a view is at least 4 character rows
 ;; high and 4 character columns wide.
-(defun bsm-view-render (view btile)
+(defun bsm-view-render (view)
   "Render the view's meta data and visible crates into the supplied btile."
-  (unless (and (>= (bsm-btile-rows btile) 4)
-               (>= (bsm-btile-cols btile) 4))
-    (bsm-error "view to small to render: %s\n" view))
 
-  ;; First, draw the name row
-  (let* ((view-name (bsm-view-name view))
-         (prop-view-name view-name)
-         (view-title (concat "| " prop-view-name)))
-    (bsm-btile-render-row btile view-title 0 0))
+  (let ((btile (bsm-view-btile view)))
+    (unless (and (>= (bsm-btile-rows btile) 4)
+                 (>= (bsm-btile-cols btile) 4))
+      (bsm-error "view to small to render: %s\n" view))
 
-  ;; Next, draw the box boundaries.
-  (let* ((boundary (bsm-bound/relative-make 1 0 0 0)))
-    (bsm-btile-render-boundary btile boundary)
+    ;; First, draw the name row
+    (bsm-view-render-name view)
 
-    ;; Next, cut the inside of the btile up into cells and fill in the crates.
-    ;;
-    ;; TODO: Here we're gonna choose single characters for testing purposes. It
-    ;; should be some function to the number of crates along with readability
-    ;; criteria.
-    ;;
-    ;; TODO: I don't know what those are yet.
+    ;; Next, cut the inside of the btile up into a boundary and inner btile
+    ;; into which the crates are rendered.
     (let* ((view-inner-btile (bsm-btile))
-           (row-end (1+ (- (bsm-btile-rows btile) 3)))
-           (col-end (1+ (- (bsm-btile-cols btile) 2)))
-           (loc (bsm-loc))
-           (rendering-btile (bsm-btile)))
-      ;; The sub-btile of the entire renderable area used for
-      ;; crates in the view's btile is the view-inner-btile
-      (bsm-btile-make-subtile btile 2 1
-                              (- (bsm-btile-rows btile) 3)
-                              (- (bsm-btile-cols btile) 2)
-                              view-inner-btile)
+           (row-end (- (bsm-btile-rows btile) 3))
+           (col-end (- (bsm-btile-cols btile) 2))
+           (loc (bsm-loc)))
+
+      ;; The view-inner-btile is a subregion of the btile into which we render
+      ;; the boundary information and all the crates.
+      (bsm-btile-layout-subtile btile 2 1
+                                row-end
+                                col-end
+                                view-inner-btile)
 
       ;; Now get each crate by location in grid and render it.
       ;;
-      ;; TODO: We haven't properly figured out the size of the grid, so we're
-      ;; assuming 1x1.
+      ;; TODO: We haven't properly figured out the bbox contribution and the
+      ;; "overland" behavior of the cursor, so we always render from origin
+      ;; until we figure that out.
+      ;;
+      ;; TODO: I think we should render even incomplete entries even if they
+      ;; are somehow partially visible. This involves better understanding of
+      ;; clipping the subtile to the view-inner-tile.
       (cl-loop
-       for r from 0 below (bsm-btile-rows view-inner-btile)
+       for r from 0 below (/ (bsm-btile-rows view-inner-btile)
+                             (bsm-view-crate-rows view))
        do (cl-loop
-           for c from 0 below (bsm-btile-cols view-inner-btile)
+           for c from 0 below (/ (bsm-btile-cols view-inner-btile)
+                                 (bsm-view-crate-cols view))
            do
-           ;; The rendering-btile is the btile into which the crate is
-           ;; rendered.
-           (bsm-btile-make-subtile view-inner-btile r c 1 1 rendering-btile)
-
            (setf (bsm-loc-y loc) r
                  (bsm-loc-x loc) c)
-
            ;; Just render crate at [r,c] into rendering-view.
-           ;;
-           ;; TODO: Take into consideration view-cursor location and centering
-           ;; it.
+
            (when-let ((crate (bsm-view-get-crate view loc)))
-             (bsm-crate-render crate rendering-btile)))))))
+             ;; We use the crate's btile as a subregion of the view-inner-btile
+             ;; into which the crate is rendered.
+             (bsm-btile-layout-subtile view-inner-btile
+                                       (* r (bsm-view-crate-rows view))
+                                       (* c (bsm-view-crate-cols view))
+                                       (bsm-view-crate-rows view)
+                                       (bsm-view-crate-cols view)
+                                       (bsm-crate-btile crate))
+             (bsm-crate-render crate))))
 
+      ;; Finally, draw the view box boundaries...
+      ;;
+      ;; TODO: we need to know if any of the boundaries are open or closed. So
+      ;; we need to do this a little later (by inspecting the boundary box
+      ;; we're drawing when coupled with the viewport we're rendering) when we
+      ;; compute that stuff.
+      (let* ((boundary (bsm-bound/relative-make 1 0 0 0)))
+        (bsm-btile-render-boundary btile boundary))
 
-(defun bsm-view-test-render ()
-  "A test function."
-  (with-current-buffer "*bsm-space-display*"
-    (save-excursion
-      (let* ((btile (bsm-btile-make (current-buffer) (point) 80 16 16))
-             (entity (bsm-ent/buf-make (current-buffer)))
-             (crate (bsm-crate-make (bsm-loc-make 0 0) entity))
-             (view (bsm-view-make "test-view")))
+      )))
 
-        ;; Fill the crate with something intereting.
-        (setf (bsm-crate-foreground-color crate) "white"
-              (bsm-crate-background-color crate) "blue"
-              (bsm-crate-pin-p crate) t)
+;; --------------------------------
 
-        (bsm-view-put-crate view crate)
+;; TODO: I may or may not need this since I moved the btiles into the
+;; views themselves. Since the space already has the views, it can
+;; allocate their btiles properly and already had reference to them via
+;; the view reference.
 
-        (bsm-view-render view btile)))))
+;; This class pairs a view with additional information so the view can be
+;; told where it should render by the space.
+(defclass bsm-layout ()
+  (;; The view we want to render.
+   (%bsm-layout-view :accessor bsm-layout-view
+                     :initarg :bsm-layout-view)
+   ;; This is the location of the btile in the display-buffer coordinates.
+   (%bsm-layout-location :accessor bsm-layout-location
+                         :initarg :bsm-layout-location)
+   ;; This is the btile into which the view must _fully_ render itself.
+   ;; This btile's charpos must always reference the same location as the
+   ;; layout-location in terms of the display-buffer.
+   (%bsm-layout-btile :accessor bsm-layout-btile
+                      :initarg :bsm-layout-btile)))
+
+(defun bsm-layout-make (item loc btile)
+  (bsm-layout :bsm-layout-item item
+              :bsm-layout-location loc
+              :bsm-layout-btile btile))
 
 ;; --------------------------------
 
 ;; This is not fully spec'ed out, just a placeholder for now.
+;; The space object is responsible for assigning and managing the btiles
+;; associated with each view.
 (defclass bsm-space ()
-  ((%bsm-space-selected-view :accessor bsm-space-selected-view
+  (;; In which view should be expect the cursor to be?
+   (%bsm-space-selected-view :accessor bsm-space-selected-view
                              :initarg :bsm-space-selected-view
                              :type bsm-view)
-   ;; The buffer into which we render the buffer-space.
+   ;; The elisp buffer into which we render the buffer-space.
    (%bsm-space-display-buffer :reader bsm-space-display-buffer
                               :initarg :bsm-space-display-buffer
                               :type buffer)
+   ;; All the the views are stored here.
    (%bsm-space-views :reader bsm-space-views
                      :initarg :bsm-space-views
                      ;; KEY: bsm-view name, VALUE: bsm-view
                      :initform (bsm-midt-make 'equal 'eq)
-                     :type bsm-midt)))
+                     :type bsm-midt)
+   ;; TODO: Fixup the get/put stuff to deal with this new table.  The space
+   ;; decides where a view should be rendered in the display buffer, how big
+   ;; the view should be, and it deconflicts collision detection or other such
+   ;; things when moving views around in the space or resizing them. We record
+   ;; that information here. Layouts are lazily constructed as needed.
+   (%bsm-space-layouts :reader bsm-space-layouts
+                       :initarg :bsm-space-layouts
+                       ;; KEY: bsm-view, VALUE: bsm-layout
+                       :initform (make-hash-table :test 'eq))))
 
 (defun bsm-space-put-view (space view-or-name &optional select)
   "If view-or-name is a string, construct a new view by that name and insert it
@@ -1095,7 +1249,6 @@ space. Return the view."
 present. If ensure is t and it is not present construct the new
 view (or if itis already a view) and add it to the space. Return
 the view."
-  ;; keep going, implement ensure.
   (let ((view (bsm-midt-get view-or-name (bsm-space-views space) nil)))
     (if view
         view
@@ -1116,18 +1269,55 @@ view named: default."
            ;; from it that might not be doable.
            :bsm-space-display-buffer
            (get-buffer-create "*bsm-space-display*")))
-
          (view-or-name "default")
          (view (bsm-space-put-view new-space view-or-name t)))
-
     new-space))
 
-(defun bsm-debug-render (display-buffer display-window)
-  "This function assumes it is called in a with-current-buffer form."
-  (let ((time-format "%a %b %d %H:%M:%S %Z %Y\n"))
-    (insert (format-time-string time-format (current-time)))
-    (insert (format "The window body (width, height) is: (%s, %s)\n"
-                    (window-body-width) (window-body-height)))))
+;; This is wonky currently because the space is assigning the btiles to the
+;; view for drawing. So that needs to be figured out first before I can write
+;; the bsm-view-get-cursor function.
+(defun bsm-space-get-cursor-charpos (space)
+  "Ask the space where the cursor should be. Currently it just asks
+the selected view where it will initialize its cursor in terms of
+the character position of the underlying display buffer. Return
+that buffer character position. If the cursor location is not
+set, a place will be found for it and then that returned."
+  (let ((selected-view (bsm-space-selected-view space)))
+    (unless selected-view
+      (bsm-error "There must always be a selected view to init a cursor!"))
+
+    (let ((btile 'fill-me-in))
+      ;; TODO: Get the layout, cause the view needs to know the btile it is
+      ;; rendering into in order to compute the charpos of the cursor.
+
+      ;; TODO: write the below function--but see above comment.
+      (bsm-view-get-cursor-charpos selected-view btile))))
+
+(defun bsm-space-debug-render (space btile display-window)
+  "Render some debug information into the space's btile at row N > 0, col 1
+for each chunk of information."
+  (let* ((time-format "Time: %a %b %d %H:%M:%S %Z %Y")
+         (the-time (format-time-string time-format (current-time)))
+         (the-window (format "Window: (width: %s, height: %s)"
+                             (window-body-width) (window-body-height))))
+    (cl-loop for info in (list the-time the-window)
+             for row from 1 by 1
+             do (bsm-btile-render-row btile info row 1))))
+
+(defun bsm-space-render-clear (space)
+  ;; NOTE: Last column is dedicated to newlines in the display buffer.
+  ;; Otherwise the fringe will show up in tty mode.
+  (let* ((display-buffer (bsm-space-display-buffer space))
+         (display-window (selected-window))
+         (stride (window-body-width))
+         ;; Minus 1 because the last column is reserved for newlines.
+         (body-width (1- stride))
+         (body-height (window-body-height)))
+    (with-current-buffer display-buffer
+      (erase-buffer)
+      (let ((empty-row (concat (make-string body-width ?\s) "\n")))
+        (cl-loop repeat body-height
+                 do (insert empty-row))))))
 
 ;; This function needs a lot of work to behave right.
 (defun bsm-space-render (space)
@@ -1140,45 +1330,106 @@ view named: default."
            (body-height (window-body-height))
            (loc (bsm-loc-make 0 0))
            (sel-view (bsm-space-selected-view space))
+           ;; This is the btile for the entire space.
            (display-btile (bsm-btile-make display-buffer 1 stride
                                           body-height body-width))
            (display-boundary (bsm-bound/relative-make 0 0 0 0)))
       (with-current-buffer display-buffer
-        (save-excursion
+        (progn
           ;; TODO: Find a better way to handle these odd things for other
-          ;; emacs modes
+          ;; emacs modes. Maybe a hook?
           (display-line-numbers-mode -1)
 
-          ;; MUST DO FIRST: Fill it with empty space.
-          (erase-buffer)
-          ;; NOTE: Last column is dedicated to newlines in the display buffer.
-          ;; Otherwise the fringe will show up in tty mode.
-          (let ((empty-row (concat (make-string body-width ?\s) "\n")))
-            (cl-loop for row from 0 below body-height
-                     do (insert empty-row)))
+          ;; MUST DO FIRST: Fill display with empty space.
+          (bsm-space-render-clear space)
 
-          ;; draw boundary for now cause it is a good sanity check.
+          ;; Some debug stuff.
+          (bsm-space-debug-render space display-btile display-window)
+
+          ;; draw boundary around the whole window for now cause it is a good
+          ;; sanity check.
           (bsm-btile-render-boundary display-btile display-boundary)
 
           ;; Draw all of the views in the right places.
           ;;
           ;; TODO: Fixme for having the space assign a location to all views,
           ;; and for rendering all views.
-          (let* ((default-view (bsm-space-get-view space "default"))
-                 (bbox (bsm-view-bbox default-view))
-                 (bbox-width (bsm-bbox-width bbox))
-                 (bbox-height (bsm-bbox-height bbox)))
-            (bsm-view-render default-view
-                             (bsm-btile-make
-                              (bsm-space-display-buffer space)
-                              ;; NOTE: 1+ to account for newline column in
-                              ;; display-buffer.
-                              (+ (* (1+ body-width) 5) 10) (1+ body-width)
-                              ;; These are in terms of the bbox of the view, we
-                              ;; need extra decoration around it to make a
-                              ;; minimum sized view display.
-                              (+ 3 bbox-height)
-                              (+ 2 bbox-width)))))))))
+          (let* ((default-view (bsm-space-get-view space "default")))
+
+            (bsm-btile-layout-subtile display-btile
+                                      5 10
+                                      (bsm-view-rows default-view)
+                                      (bsm-view-cols default-view)
+                                      (bsm-view-btile default-view))
+            (bsm-view-render default-view)
+
+            ;; now, put point into 0,0 in the view's btile view. This is why we
+            ;; don't bother to save the excursion. We physically move the point
+            ;; to the selected view at this time.
+            ;;
+            ;; TODO: We really should ask the view where the point should be.
+            ;; for now this is just a hack to get it into the right spot.
+            ;; should be:
+            ;; bsm-space-place-cursor, which finds the selected view, then
+            ;; asks the view for where to put the cursor inside of itself.
+            ;; The bubbled up value ends up here.
+            (goto-char
+             (bsm-btile-get-charpos (bsm-view-btile default-view) 2 1))
+
+            ))))))
+
+(defun bsm-space-increase-default-view-cols (space)
+  (let* ((default-view (bsm-space-get-view space "default")))
+    ;; TODO: we need to check this against the space's btile. Oops. We need to
+    ;; define and initialize the space's btile properly. :)
+    (incf (bsm-view-cols default-view))))
+
+(defun bsm-space-decrease-default-view-cols (space)
+  (let* ((default-view (bsm-space-get-view space "default")))
+    ;; TODO: we need to check this against the space's btile. Oops. We need to
+    ;; define and initialize the space's btile properly. :)
+    (when (> (bsm-view-cols default-view) 4)
+      (decf (bsm-view-cols default-view)))))
+
+(defun bsm-space-increase-default-view-rows (space)
+  (let* ((default-view (bsm-space-get-view space "default")))
+    ;; TODO: we need to check this against the space's btile. Oops. We need to
+    ;; define and initialize the space's btile properly. :)
+    (incf (bsm-view-rows default-view))))
+
+(defun bsm-space-decrease-default-view-rows (space)
+  (let* ((default-view (bsm-space-get-view space "default")))
+    ;; TODO: we need to check this against the space's btile. Oops. We need to
+    ;; define and initialize the space's btile properly. :)
+    (when (> (bsm-view-rows default-view) 4)
+      (decf (bsm-view-rows default-view)))))
+
+(defun bsm-space-zoom-in-cols-default-view (space)
+  (let* ((default-view (bsm-space-get-view space "default")))
+    (when (> (bsm-view-crate-cols default-view) 1)
+      (decf (bsm-view-crate-cols default-view)))))
+
+(defun bsm-space-zoom-out-cols-default-view (space)
+  (let* ((default-view (bsm-space-get-view space "default")))
+    (when (< (bsm-view-crate-cols default-view)
+             ;; minus 2 for border
+             (- (bsm-view-cols default-view) 2))
+      (incf (bsm-view-crate-cols default-view)))))
+
+;; TODO maybe broken
+(defun bsm-space-zoom-in-rows-default-view (space)
+  (let* ((default-view (bsm-space-get-view space "default")))
+    (when (> (bsm-view-crate-rows default-view) 1)
+      (decf (bsm-view-crate-rows default-view)))))
+
+;; TODO maybe broken.
+(defun bsm-space-zoom-out-rows-default-view (space)
+  (let* ((default-view (bsm-space-get-view space "default")))
+    (when (< (bsm-view-crate-rows default-view)
+             ;; minus 3 for border & title
+             (- (bsm-view-rows default-view) 3))
+      (incf (bsm-view-crate-rows default-view)))))
+
 
 ;; --------------------------------
 
@@ -1191,6 +1442,7 @@ view named: default."
   (let* ((new-space (bsm-space-make))
          (selected-view (bsm-space-selected-view new-space))
          (buffers (buffer-list))
+         ;; TODO: The max is just for testing purposes
          (rect-edge-length (ceiling (sqrt (length buffers)))))
     (princ (format "Inserting %s buffers in a square %s units high and wide."
                    (length buffers) rect-edge-length))
@@ -1307,18 +1559,22 @@ current workspace."
 ;;; Movement functions (interactive to hook to keys)
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; broken
 (defun bsm-look-left ()
   (interactive)
   (bsm-move-horizontally -1))
 
+;; broken
 (defun bsm-look-down ()
   (interactive)
   (bsm-move-vertically 1))
 
+;; broken
 (defun bsm-look-right ()
   (interactive)
   (bsm-move-horizontally 1))
 
+;; broken
 (defun bsm-look-up ()
   (interactive)
   (bsm-move-vertically -1))
@@ -1326,4 +1582,44 @@ current workspace."
 (defun bsm-render ()
   (interactive)
   (bsm-seed-buffer-space)
+  (bsm-space-render *bsm-buffer-space*))
+
+(defun bsm-increase-default-view-cols ()
+  (interactive)
+  (bsm-space-increase-default-view-cols *bsm-buffer-space*)
+  (bsm-space-render *bsm-buffer-space*))
+
+(defun bsm-decrease-default-view-cols ()
+  (interactive)
+  (bsm-space-decrease-default-view-cols *bsm-buffer-space*)
+  (bsm-space-render *bsm-buffer-space*))
+
+(defun bsm-increase-default-view-rows ()
+  (interactive)
+  (bsm-space-increase-default-view-rows *bsm-buffer-space*)
+  (bsm-space-render *bsm-buffer-space*))
+
+(defun bsm-decrease-default-view-rows ()
+  (interactive)
+  (bsm-space-decrease-default-view-rows *bsm-buffer-space*)
+  (bsm-space-render *bsm-buffer-space*))
+
+(defun bsm-zoom-in-cols-default-view ()
+  (interactive)
+  (bsm-space-zoom-in-cols-default-view *bsm-buffer-space*)
+  (bsm-space-render *bsm-buffer-space*))
+
+(defun bsm-zoom-out-cols-default-view ()
+  (interactive)
+  (bsm-space-zoom-out-cols-default-view *bsm-buffer-space*)
+  (bsm-space-render *bsm-buffer-space*))
+
+(defun bsm-zoom-in-rows-default-view ()
+  (interactive)
+  (bsm-space-zoom-in-rows-default-view *bsm-buffer-space*)
+  (bsm-space-render *bsm-buffer-space*))
+
+(defun bsm-zoom-out-rows-default-view ()
+  (interactive)
+  (bsm-space-zoom-out-rows-default-view *bsm-buffer-space*)
   (bsm-space-render *bsm-buffer-space*))
