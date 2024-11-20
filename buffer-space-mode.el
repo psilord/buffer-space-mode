@@ -1319,6 +1319,10 @@ for each chunk of information."
         (cl-loop repeat body-height
                  do (insert empty-row))))))
 
+;; ----------------------------------------------------------
+;; buffer space mode keyboard API
+;; ----------------------------------------------------------
+
 ;; This function needs a lot of work to behave right.
 (defun bsm-space-render (space)
   (when space
@@ -1336,6 +1340,7 @@ for each chunk of information."
            (display-boundary (bsm-bound/relative-make 0 0 0 0)))
       (with-current-buffer display-buffer
         (progn
+          (buffer-space-mode)
           ;; TODO: Find a better way to handle these odd things for other
           ;; emacs modes. Maybe a hook?
           (display-line-numbers-mode -1)
